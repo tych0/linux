@@ -95,4 +95,14 @@ static inline void get_seccomp_filter(struct task_struct *tsk)
 	return;
 }
 #endif /* CONFIG_SECCOMP_FILTER */
+
+#ifdef CONFIG_CHECKPOINT_RESTORE
+extern bool may_suspend_seccomp(void);
+#else
+static inline bool may_suspend_seccomp(void)
+{
+	return false;
+}
+#endif
+
 #endif /* _LINUX_SECCOMP_H */
