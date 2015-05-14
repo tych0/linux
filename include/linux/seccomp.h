@@ -53,6 +53,10 @@ static inline int seccomp_mode(struct seccomp *s)
 	return s->mode;
 }
 
+#ifdef CONFIG_CHECKPOINT_RESTORE
+extern bool may_suspend_seccomp(void);
+#endif
+
 #else /* CONFIG_SECCOMP */
 
 #include <linux/errno.h>

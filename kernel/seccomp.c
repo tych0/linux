@@ -590,6 +590,11 @@ void secure_computing_strict(int this_syscall)
 {
 	int mode = current->seccomp.mode;
 
+#ifdef CONFIG_CHECKPOINT_RESTORE
+	if (unlikely(current->ptrace & PT_SUSPEND_SECCOMP))
+		return;
+#endif
+
 	if (mode == 0)
 		return;
 	else if (mode == SECCOMP_MODE_STRICT)
@@ -690,6 +695,11 @@ u32 seccomp_phase1(struct seccomp_data *sd)
 	int mode = current->seccomp.mode;
 	int this_syscall = sd ? sd->nr :
 		syscall_get_nr(current, task_pt_regs(current));
+
+#ifdef CONFIG_CHECKPOINT_RESTORE
+	if (unlikely(current->ptrace & PT_SUSPEND_SECCOMP))
+		return SECCOMP_PHASE1_OK;
+#endif
 
 	switch (mode) {
 	case SECCOMP_MODE_STRICT:
@@ -901,3 +911,16 @@ long prctl_set_seccomp(unsigned long seccomp_mode, char __user *filter)
 	/* prctl interface doesn't have flags, so they are always zero. */
 	return do_seccomp(op, 0, uargs);
 }
+
+#ifdef CONFIG_CHECKPOINT_RESTORE
+bool may_suspend_seccomp(void)
+{
+	if (!capable(CAP_SYS_ADMIN))
+		return false;
+
+	if (current->seccomp.mode != SECCOMP_MODE_DISABLED)
+		return false;
+
+	return true;
+}
+#endif /* CONFIG_CHECKPOINT_RESTORE */

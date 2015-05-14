@@ -15,6 +15,7 @@
 #include <linux/highmem.h>
 #include <linux/pagemap.h>
 #include <linux/ptrace.h>
+#include <linux/seccomp.h>
 #include <linux/security.h>
 #include <linux/signal.h>
 #include <linux/uio.h>
@@ -555,6 +556,9 @@ static int ptrace_setoptions(struct task_struct *child, unsigned long data)
 
 	if (data & ~(unsigned long)PTRACE_O_MASK)
 		return -EINVAL;
+
+	if (data & PTRACE_O_SUSPEND_SECCOMP && !may_suspend_seccomp())
+		return -EPERM;
 
 	/* Avoid intermediate state when all opts are cleared */
 	flags = child->ptrace;
