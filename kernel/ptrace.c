@@ -15,6 +15,7 @@
 #include <linux/highmem.h>
 #include <linux/pagemap.h>
 #include <linux/ptrace.h>
+#include <linux/seccomp.h>
 #include <linux/security.h>
 #include <linux/signal.h>
 #include <linux/uio.h>
@@ -1003,6 +1004,15 @@ int ptrace_request(struct task_struct *child, long request,
 		break;
 	}
 #endif
+
+#if defined(CONFIG_SECCOMP) && defined(CONFIG_CHECKPOINT_RESTORE)
+	case PTRACE_SUSPEND_SECCOMP:
+		if (data)
+			return suspend_seccomp(child);
+		else
+			return resume_seccomp(child);
+#endif
+
 	default:
 		break;
 	}

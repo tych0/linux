@@ -25,6 +25,9 @@ struct seccomp_filter;
 struct seccomp {
 	int mode;
 	struct seccomp_filter *filter;
+#ifdef CONFIG_CHECKPOINT_RESTORE
+	bool suspended;
+#endif
 };
 
 #ifdef CONFIG_HAVE_ARCH_SECCOMP_FILTER
@@ -52,6 +55,11 @@ static inline int seccomp_mode(struct seccomp *s)
 {
 	return s->mode;
 }
+
+#ifdef CONFIG_CHECKPOINT_RESTORE
+extern int suspend_seccomp(struct task_struct *);
+extern int resume_seccomp(struct task_struct *);
+#endif
 
 #else /* CONFIG_SECCOMP */
 

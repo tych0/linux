@@ -569,6 +569,7 @@ static int mode1_syscalls_32[] = {
 static void __secure_computing_strict(int this_syscall)
 {
 	int *syscall_whitelist = mode1_syscalls;
+
 #ifdef CONFIG_COMPAT
 	if (is_compat_task())
 		syscall_whitelist = mode1_syscalls_32;
@@ -589,6 +590,11 @@ static void __secure_computing_strict(int this_syscall)
 void secure_computing_strict(int this_syscall)
 {
 	int mode = current->seccomp.mode;
+
+#ifdef CONFIG_CHECKPOINT_RESTORE
+	if (current->seccomp.suspended)
+		return;
+#endif
 
 	if (mode == 0)
 		return;
@@ -691,6 +697,11 @@ u32 seccomp_phase1(struct seccomp_data *sd)
 	int this_syscall = sd ? sd->nr :
 		syscall_get_nr(current, task_pt_regs(current));
 
+#ifdef CONFIG_CHECKPOINT_RESTORE
+	if (unlikely(current->seccomp.suspended))
+		return SECCOMP_PHASE1_OK;
+#endif
+
 	switch (mode) {
 	case SECCOMP_MODE_STRICT:
 		__secure_computing_strict(this_syscall);  /* may call do_exit */
@@ -769,7 +780,8 @@ static long seccomp_set_mode_strict(void)
 		goto out;
 
 #ifdef TIF_NOTSC
-	disable_TSC();
+	if (!current->seccomp.suspended)
+		disable_TSC();
 #endif
 	seccomp_assign_mode(current, seccomp_mode);
 	ret = 0;
@@ -901,3 +913,51 @@ long prctl_set_seccomp(unsigned long seccomp_mode, char __user *filter)
 	/* prctl interface doesn't have flags, so they are always zero. */
 	return do_seccomp(op, 0, uargs);
 }
+
+#ifdef CONFIG_CHECKPOINT_RESTORE
+int suspend_seccomp(struct task_struct *task)
+{
+	int ret = -EACCES;
+
+	spin_lock_irq(&task->sighand->siglock);
+
+	if (!capable(CAP_SYS_ADMIN))
+		goto out;
+
+	task->seccomp.suspended = true;
+
+#ifdef TIF_NOTSC
+	if (task->seccomp.mode == SECCOMP_MODE_STRICT)
+		clear_tsk_thread_flag(task, TIF_NOTSC);
+#endif
+
+	ret = 0;
+out:
+	spin_unlock_irq(&task->sighand->siglock);
+
+	return ret;
+}
+
+int resume_seccomp(struct task_struct *task)
+{
+	int ret = -EACCES;
+
+	spin_lock_irq(&task->sighand->siglock);
+
+	if (!capable(CAP_SYS_ADMIN))
+		goto out;
+
+	task->seccomp.suspended = false;
+
+#ifdef TIF_NOTSC
+	if (task->seccomp.mode == SECCOMP_MODE_STRICT)
+		set_tsk_thread_flag(task, TIF_NOTSC);
+#endif
+
+	ret = 0;
+out:
+	spin_unlock_irq(&task->sighand->siglock);
+
+	return ret;
+}
+#endif /* CONFIG_CHECKPOINT_RESTORE */
