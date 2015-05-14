@@ -556,6 +556,15 @@ static int ptrace_setoptions(struct task_struct *child, unsigned long data)
 	if (data & ~(unsigned long)PTRACE_O_MASK)
 		return -EINVAL;
 
+	if (unlikely(data & PTRACE_O_SUSPEND_SECCOMP)) {
+		if (!config_enabled(CONFIG_CHECKPOINT_RESTORE) ||
+		    !config_enabled(CONFIG_SECCOMP))
+			return -EINVAL;
+
+		if (!capable(CAP_SYS_ADMIN))
+			return -EPERM;
+	}
+
 	/* Avoid intermediate state when all opts are cleared */
 	flags = child->ptrace;
 	flags &= ~(PTRACE_O_MASK << PT_OPT_FLAG_SHIFT);
