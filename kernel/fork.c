@@ -1159,7 +1159,7 @@ static int copy_signal(unsigned long clone_flags, struct task_struct *tsk)
 	return 0;
 }
 
-static void copy_seccomp(struct task_struct *p)
+static void copy_seccomp(struct task_struct *p, bool ptrace)
 {
 #ifdef CONFIG_SECCOMP
 	/*
@@ -1173,6 +1173,12 @@ static void copy_seccomp(struct task_struct *p)
 	/* Ref-count the new filter user, and assign it. */
 	get_seccomp_filter(current);
 	p->seccomp = current->seccomp;
+
+	/*
+	 * If the new task is not going to be traced, we need to re-enable
+	 * seccomp for it.
+	 */
+	p->seccomp.suspended = current->seccomp.suspended && ptrace;
 
 	/*
 	 * Explicitly enable no_new_privs here in case it got set
@@ -1536,7 +1542,7 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 	 * Copy seccomp details explicitly here, in case they were changed
 	 * before holding sighand lock.
 	 */
-	copy_seccomp(p);
+	copy_seccomp(p, (clone_flags & CLONE_PTRACE) || trace);
 
 	/*
 	 * Process group and session signals need to be delivered to just the

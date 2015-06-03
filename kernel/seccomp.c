@@ -919,10 +919,13 @@ int suspend_seccomp(struct task_struct *task)
 {
 	int ret = -EACCES;
 
-	spin_lock_irq(&task->sighand->siglock);
-
 	if (!capable(CAP_SYS_ADMIN))
-		goto out;
+		return ret;
+
+	if (current->seccomp.mode != SECCOMP_MODE_DISABLED)
+		return ret;
+
+	spin_lock_irq(&task->sighand->siglock);
 
 	task->seccomp.suspended = true;
 
@@ -938,26 +941,17 @@ out:
 	return ret;
 }
 
-int resume_seccomp(struct task_struct *task)
+/*
+ * CONTEXT:
+ * assumes spin_lock(&task->sighand->siglock) is held
+ */
+void resume_seccomp(struct task_struct *task)
 {
-	int ret = -EACCES;
-
-	spin_lock_irq(&task->sighand->siglock);
-
-	if (!capable(CAP_SYS_ADMIN))
-		goto out;
-
 	task->seccomp.suspended = false;
 
 #ifdef TIF_NOTSC
 	if (task->seccomp.mode == SECCOMP_MODE_STRICT)
 		set_tsk_thread_flag(task, TIF_NOTSC);
 #endif
-
-	ret = 0;
-out:
-	spin_unlock_irq(&task->sighand->siglock);
-
-	return ret;
 }
 #endif /* CONFIG_CHECKPOINT_RESTORE */

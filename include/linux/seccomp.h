@@ -58,7 +58,7 @@ static inline int seccomp_mode(struct seccomp *s)
 
 #ifdef CONFIG_CHECKPOINT_RESTORE
 extern int suspend_seccomp(struct task_struct *);
-extern int resume_seccomp(struct task_struct *);
+extern void resume_seccomp(struct task_struct *);
 #endif
 
 #else /* CONFIG_SECCOMP */

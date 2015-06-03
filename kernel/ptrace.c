@@ -81,6 +81,11 @@ void __ptrace_unlink(struct task_struct *child)
 	spin_lock(&child->sighand->siglock);
 
 	/*
+	 * In case the tracer suspended seccomp, let's resume it.
+	 */
+	resume_seccomp(child);
+
+	/*
 	 * Clear all pending traps and TRAPPING.  TRAPPING should be
 	 * cleared regardless of JOBCTL_STOP_PENDING.  Do it explicitly.
 	 */
@@ -1007,10 +1012,7 @@ int ptrace_request(struct task_struct *child, long request,
 
 #if defined(CONFIG_SECCOMP) && defined(CONFIG_CHECKPOINT_RESTORE)
 	case PTRACE_SUSPEND_SECCOMP:
-		if (data)
-			return suspend_seccomp(child);
-		else
-			return resume_seccomp(child);
+		return suspend_seccomp(child);
 #endif
 
 	default:
