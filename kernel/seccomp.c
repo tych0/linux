@@ -909,3 +909,169 @@ long prctl_set_seccomp(unsigned long seccomp_mode, char __user *filter)
 	/* prctl interface doesn't have flags, so they are always zero. */
 	return do_seccomp(op, 0, uargs);
 }
+
+#if defined(CONFIG_SECCOMP_FILTER) && defined(CONFIG_CHECKPOINT_RESTORE)
+/*
+ * The buffer here is a u32 which indicates the number of filter programs,
+ * followed by a repeated sequence of: u32 the number of struct bpf_insn for
+ * that program and the structs themselves.
+ *
+ * The first entry is the latest installed (i.e. bottom) filter in the tree.
+ */
+long prctl_dump_seccomp_filters(char __user *buf, u32 __user *bufsize)
+{
+	struct seccomp_filter *cur;
+	u32 count = 0;
+	void __user *bufp;
+	long ret;
+
+	if (seccomp_mode(&current->seccomp) != SECCOMP_MODE_FILTER)
+		return -EINVAL;
+
+	bufp = buf;
+	bufp += sizeof(count);
+
+	for (cur = current->seccomp.filter; cur; cur = cur->prev) {
+		int insn_size = sizeof(struct bpf_insn) * cur->prog->len;
+
+		if (buf) {
+
+			ret = put_user(cur->prog->len, (u32 *) bufp);
+			if (ret < 0)
+				return ret;
+			bufp += sizeof(cur->prog->len);
+
+			if (copy_to_user(bufp, cur->prog->insnsi, insn_size))
+				return -EFAULT;
+		} else {
+			bufp += sizeof(cur->prog->len);
+		}
+
+		bufp += insn_size;
+		count++;
+	}
+
+	if (buf) {
+		ret = put_user(count, (u32 *) buf);
+		if (ret < 0)
+			return ret;
+	}
+
+	put_user(bufp - (void *) buf, bufsize);
+	return 0;
+}
+
+long prctl_restore_seccomp_filters(char __user *buf, u32 __user *bufsize)
+{
+	struct seccomp_filter *head = NULL;
+	u32 i, total, kbufsize;
+	void __user *cur;
+	int ret;
+
+	if (!capable(CAP_SYS_ADMIN))
+		return -EACCES;
+
+	spin_lock_irq(&current->sighand->siglock);
+
+	ret = -EACCES;
+	if (!seccomp_may_assign_mode(SECCOMP_MODE_FILTER))
+		goto unlock;
+
+	ret = -EFAULT;
+	if (get_user(kbufsize, bufsize))
+		goto unlock;
+
+	cur = buf;
+	if (get_user(total, ((u32 *) cur)))
+		goto unlock;
+	cur += sizeof(total);
+
+	for (i = 0; i < total; i++) {
+		struct seccomp_filter *next;
+		u32 len;
+
+		ret = -EFAULT;
+		if (get_user(len, (u32 *) cur))
+			goto free_filter_list;
+		cur += sizeof(len);
+
+		ret = -EINVAL;
+		if (len <= 0)
+			goto free_filter_list;
+
+		if (len * sizeof(struct bpf_insn) > *bufsize)
+			goto free_filter_list;
+
+		ret = -ENOMEM;
+		next = kzalloc(sizeof(struct seccomp_filter),
+			       GFP_KERNEL|__GFP_NOWARN);
+		if (!next)
+			goto free_filter_list;
+
+		next->prog = bpf_prog_alloc(len, __GFP_NOWARN);
+		if (!next->prog) {
+			kfree(next);
+			goto free_filter_list;
+		}
+
+		/*
+		 * TODO: we should check the program's instructions here, as
+		 * we're blindly trusting userspace.
+		 *
+		 * We should also have a "better" serialization format than
+		 * just the struct definition. This will very likely vary
+		 * across compilers and compiler versions, so we should be
+		 * explicit about packing. As a quick hack it works for now,
+		 * though.
+		 */
+		ret = -EFAULT;
+		if (copy_from_user(next->prog->insnsi, cur, sizeof(struct bpf_insn) * len)) {
+			__bpf_prog_free(next->prog);
+			kfree(next);
+			goto free_filter_list;
+		}
+		cur += sizeof(struct bpf_insn) * len;
+		next->prog->len = len;
+
+		bpf_prog_select_runtime(next->prog);
+		/*
+		 * Here, we read the filters out of the buffer in the order
+		 * they were dumped, which is lowest in the tree first. When we
+		 * insert them, we want to insert them in the reverse order; we
+		 * build this list up backwards accordingly.
+		 */
+		if (head)
+			next->prev = head;
+		head = next;
+	}
+
+	 while (head) {
+		struct seccomp_filter *inst = head;
+
+		head = head->prev;
+
+		/* Don't set SECCOMP_FILTER_FLAG_TSYNC; this allows us to
+		 * restore seccomp for individual threads. */
+		ret = seccomp_attach_filter(0, inst);
+		if (ret < 0)
+			goto free_filter_list;
+	 }
+
+	 seccomp_assign_mode(current, SECCOMP_MODE_FILTER);
+	 ret = 0;
+
+free_filter_list:
+	while (head) {
+		struct seccomp_filter *f;
+
+		__bpf_prog_free(head->prog);
+		f = head;
+		head = head->prev;
+		kfree(f);
+	}
+
+unlock:
+	spin_unlock_irq(&current->sighand->siglock);
+	return ret;
+}
+#endif

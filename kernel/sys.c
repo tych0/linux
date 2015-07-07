@@ -2133,6 +2133,14 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 	case PR_SET_SECCOMP:
 		error = prctl_set_seccomp(arg2, (char __user *)arg3);
 		break;
+	case PR_DUMP_SECCOMP_FILTERS:
+		error = prctl_dump_seccomp_filters((char __user *)arg2,
+						   (u32 __user *) arg3);
+		break;
+	case PR_RESTORE_SECCOMP_FILTERS:
+		error = prctl_restore_seccomp_filters((char __user *)arg2,
+						      (u32 __user *) arg3);
+		break;
 	case PR_GET_TSC:
 		error = GET_TSC_CTL(arg2);
 		break;

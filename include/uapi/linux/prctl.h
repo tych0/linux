@@ -190,4 +190,7 @@ struct prctl_mm_map {
 # define PR_FP_MODE_FR		(1 << 0)	/* 64b FP registers */
 # define PR_FP_MODE_FRE		(1 << 1)	/* 32b compatibility */
 
+#define PR_DUMP_SECCOMP_FILTERS 47
+#define PR_RESTORE_SECCOMP_FILTERS 48
+
 #endif /* _LINUX_PRCTL_H */

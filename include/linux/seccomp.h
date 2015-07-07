@@ -85,6 +85,9 @@ static inline int seccomp_mode(struct seccomp *s)
 #ifdef CONFIG_SECCOMP_FILTER
 extern void put_seccomp_filter(struct task_struct *tsk);
 extern void get_seccomp_filter(struct task_struct *tsk);
+extern long prctl_dump_seccomp_filters(char __user *buf, u32 __user *bufsize);
+extern long prctl_restore_seccomp_filters(char __user *buf,
+					  u32 __user *bufsize);
 #else  /* CONFIG_SECCOMP_FILTER */
 static inline void put_seccomp_filter(struct task_struct *tsk)
 {
@@ -93,6 +96,14 @@ static inline void put_seccomp_filter(struct task_struct *tsk)
 static inline void get_seccomp_filter(struct task_struct *tsk)
 {
 	return;
+}
+static inline long prctl_dump_seccomp_filters(char __user *buf, long bufsize)
+{
+	return -EINVAL;
+}
+static inline long prctl_restore_seccomp_filters(char __user *buf)
+{
+	return -EINVAL;
 }
 #endif /* CONFIG_SECCOMP_FILTER */
 #endif /* _LINUX_SECCOMP_H */
