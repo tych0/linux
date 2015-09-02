@@ -1080,7 +1080,12 @@ static int check_cond_jmp_op(struct verifier_env *env,
 		if (err)
 			return err;
 	} else {
-		if (insn->src_reg != BPF_REG_0) {
+		switch (insn->src_reg) {
+		case BPF_REG_0:
+		/* the classic converter generates BPF_JMP with src_reg of X */
+		case BPF_REG_X:
+			break;
+		default:
 			verbose("BPF_JMP uses reserved fields\n");
 			return -EINVAL;
 		}
