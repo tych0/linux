@@ -1612,6 +1612,15 @@ tc_cls_act_func_proto(enum bpf_func_id func_id)
 	}
 }
 
+static const struct bpf_func_proto *
+seccomp_func_proto(enum bpf_func_id func_id)
+{
+	/* At some point in the future seccomp filters may grow support for
+	 * eBPF functions. For now, these are disabled.
+	 */
+	return NULL;
+}
+
 static bool __is_valid_access(int off, int size, enum bpf_access_type type)
 {
 	/* check bounds */
@@ -1662,6 +1671,17 @@ static bool tc_cls_act_is_valid_access(int off, int size,
 	return __is_valid_access(off, size, type);
 }
 
+static bool seccomp_is_valid_access(int off, int size,
+				    enum bpf_access_type type)
+{
+	if (type == BPF_WRITE)
+		return false;
+
+	if (off < 0 || off >= sizeof(struct seccomp_data) || off & 3)
+		return false;
+
+	return true;
+}
 static u32 bpf_net_convert_ctx_access(enum bpf_access_type type, int dst_reg,
 				      int src_reg, int ctx_off,
 				      struct bpf_insn *insn_buf)
@@ -1795,6 +1815,11 @@ static const struct bpf_verifier_ops tc_cls_act_ops = {
 	.convert_ctx_access = bpf_net_convert_ctx_access,
 };
 
+static const struct bpf_verifier_ops seccomp_ops = {
+	.get_func_proto = seccomp_func_proto,
+	.is_valid_access = seccomp_is_valid_access,
+};
+
 static struct bpf_prog_type_list sk_filter_type __read_mostly = {
 	.ops = &sk_filter_ops,
 	.type = BPF_PROG_TYPE_SOCKET_FILTER,
@@ -1810,11 +1835,17 @@ static struct bpf_prog_type_list sched_act_type __read_mostly = {
 	.type = BPF_PROG_TYPE_SCHED_ACT,
 };
 
+static struct bpf_prog_type_list seccomp_type __read_mostly = {
+	.ops = &seccomp_ops,
+	.type = BPF_PROG_TYPE_SECCOMP,
+};
+
 static int __init register_sk_filter_ops(void)
 {
 	bpf_register_prog_type(&sk_filter_type);
 	bpf_register_prog_type(&sched_cls_type);
 	bpf_register_prog_type(&sched_act_type);
+	bpf_register_prog_type(&seccomp_type);
 
 	return 0;
 }
