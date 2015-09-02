@@ -590,6 +590,44 @@ free_prog:
 	return err;
 }
 
+static int bpf_prog_dump(union bpf_attr *attr, union bpf_attr __user *uattr)
+{
+	int ufd = attr->prog_fd;
+	struct fd f = fdget(ufd);
+	struct bpf_prog *prog;
+	int ret = -EINVAL;
+
+	prog = get_prog(f);
+	if (IS_ERR(prog))
+		return PTR_ERR(prog);
+
+	/* For now, let's refuse to dump anything that isn't a seccomp program.
+	 * Other program types have support for maps, which our current dump
+	 * code doesn't support.
+	 */
+	if (prog->type != BPF_PROG_TYPE_SECCOMP)
+		goto out;
+
+	ret = -EFAULT;
+	if (put_user(prog->len, &uattr->dump_insn_cnt))
+		goto out;
+
+	if (put_user((u8) prog->gpl_compatible, &uattr->gpl_compatible))
+		goto out;
+
+	if (attr->dump_insns) {
+		u32 len = prog->len * sizeof(struct bpf_insn);
+
+		if (copy_to_user(u64_to_ptr(attr->dump_insns),
+				 prog->insns, len) != 0)
+			goto out;
+	}
+
+	ret = 0;
+out:
+	return ret;
+}
+
 SYSCALL_DEFINE3(bpf, int, cmd, union bpf_attr __user *, uattr, unsigned int, size)
 {
 	union bpf_attr attr = {};
@@ -653,6 +691,9 @@ SYSCALL_DEFINE3(bpf, int, cmd, union bpf_attr __user *, uattr, unsigned int, siz
 		break;
 	case BPF_PROG_LOAD:
 		err = bpf_prog_load(&attr);
+		break;
+	case BPF_PROG_DUMP:
+		err = bpf_prog_dump(&attr, uattr);
 		break;
 	default:
 		err = -EINVAL;
