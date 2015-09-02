@@ -26,6 +26,8 @@
 #endif
 
 #ifdef CONFIG_SECCOMP_FILTER
+#include <linux/bpf.h>
+#include <uapi/linux/bpf.h>
 #include <linux/filter.h>
 #include <linux/pid.h>
 #include <linux/ptrace.h>
@@ -804,6 +806,61 @@ static inline long seccomp_set_mode_filter(unsigned int flags,
 					   const char __user *filter)
 {
 	return -EINVAL;
+}
+#endif
+
+#if defined(CONFIG_SECCOMP_FILTER) && defined(CONFIG_CHECKPOINT_RESTORE)
+long seccomp_get_filter_fd(struct task_struct *child)
+{
+	long fd;
+	struct seccomp_filter *filter;
+
+	if (!capable(CAP_SYS_ADMIN))
+		return -EACCES;
+
+	if (child->seccomp.mode != SECCOMP_MODE_FILTER)
+		return -EINVAL;
+
+	filter = child->seccomp.filter;
+
+	fd = bpf_new_fd(filter->prog, O_RDONLY);
+	if (fd > 0)
+		atomic_inc(&filter->prog->aux->refcnt);
+
+	return fd;
+}
+
+long seccomp_next_filter(struct task_struct *child, u32 fd)
+{
+	struct seccomp_filter *cur;
+	struct bpf_prog *prog;
+	long ret = -ESRCH;
+
+	if (!capable(CAP_SYS_ADMIN))
+		return -EACCES;
+
+	if (child->seccomp.mode != SECCOMP_MODE_FILTER)
+		return -EINVAL;
+
+	prog = bpf_prog_get(fd);
+	if (IS_ERR(prog)) {
+		ret = PTR_ERR(prog);
+		goto out;
+	}
+
+	for (cur = child->seccomp.filter; cur; cur = cur->prev) {
+		if (cur->prog == prog) {
+			if (!cur->prev)
+				ret = -ENOENT;
+			else
+				ret = bpf_prog_set(fd, cur->prev->prog);
+			break;
+		}
+	}
+
+out:
+	bpf_prog_put(prog);
+	return ret;
 }
 #endif
 

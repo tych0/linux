@@ -1003,6 +1003,13 @@ int ptrace_request(struct task_struct *child, long request,
 		break;
 	}
 #endif
+
+	case PTRACE_SECCOMP_GET_FILTER_FD:
+		return seccomp_get_filter_fd(child);
+
+	case PTRACE_SECCOMP_NEXT_FILTER:
+		return seccomp_next_filter(child, data);
+
 	default:
 		break;
 	}

@@ -95,4 +95,18 @@ static inline void get_seccomp_filter(struct task_struct *tsk)
 	return;
 }
 #endif /* CONFIG_SECCOMP_FILTER */
+
+#if defined(CONFIG_SECCOMP_FILTER) && defined(CONFIG_CHECKPOINT_RESTORE)
+extern long seccomp_get_filter_fd(struct task_struct *child);
+extern long seccomp_next_filter(struct task_struct *child, u32 fd);
+#else
+static inline long seccomp_get_filter_fd(struct task_struct *child)
+{
+	return -EINVAL;
+}
+static inline long seccomp_next_filter(struct task_struct *child, u32 fd)
+{
+	return -EINVAL;
+}
+#endif /* CONFIG_SECCOMP_FILTER && CONFIG_CHECKPOINT_RESTORE */
 #endif /* _LINUX_SECCOMP_H */
