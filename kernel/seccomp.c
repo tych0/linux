@@ -355,17 +355,6 @@ static struct seccomp_filter *seccomp_prepare_filter(struct sock_fprog *fprog)
 
 	BUG_ON(INT_MAX / fprog->len < sizeof(struct sock_filter));
 
-	/*
-	 * Installing a seccomp filter requires that the task has
-	 * CAP_SYS_ADMIN in its namespace or be running with no_new_privs.
-	 * This avoids scenarios where unprivileged tasks can affect the
-	 * behavior of privileged children.
-	 */
-	if (!task_no_new_privs(current) &&
-	    security_capable_noaudit(current_cred(), current_user_ns(),
-				     CAP_SYS_ADMIN) != 0)
-		return ERR_PTR(-EACCES);
-
 	/* Allocate a new seccomp_filter */
 	sfilter = kzalloc(sizeof(*sfilter), GFP_KERNEL | __GFP_NOWARN);
 	if (!sfilter)
@@ -509,6 +498,48 @@ static void seccomp_send_sigsys(int syscall, int reason)
 	info.si_syscall = syscall;
 	force_sig_info(SIGSYS, &info, current);
 }
+
+#ifdef CONFIG_BPF_SYSCALL
+static struct seccomp_filter *seccomp_prepare_ebpf(const char __user *filter)
+{
+	/* XXX: this cast generates a warning. should we make people pass in
+	 * &fd, or is there some nicer way of doing this?
+	 */
+	u32 fd = (u32) filter;
+	struct seccomp_filter *ret;
+	struct bpf_prog *prog;
+
+	prog = bpf_prog_get(fd);
+	if (IS_ERR(prog))
+		return (struct seccomp_filter *) prog;
+
+	if (prog->type != BPF_PROG_TYPE_SECCOMP) {
+		bpf_prog_put(prog);
+		return ERR_PTR(-EINVAL);
+	}
+
+	ret = kzalloc(sizeof(*ret), GFP_KERNEL | __GFP_NOWARN);
+	if (!ret) {
+		bpf_prog_put(prog);
+		return ERR_PTR(-ENOMEM);
+	}
+
+	ret->prog = prog;
+	atomic_set(&ret->usage, 1);
+
+	/* Intentionally don't bpf_prog_put() here, because the underlying prog
+	 * is refcounted too and we're holding a reference from the struct
+	 * seccomp_filter object.
+	 */
+
+	return ret;
+}
+#else
+static struct seccomp_filter *seccomp_prepare_ebpf(const char __user *filter)
+{
+	return ERR_PTR(-EINVAL);
+}
+#endif
 #endif	/* CONFIG_SECCOMP_FILTER */
 
 /*
@@ -775,8 +806,23 @@ static long seccomp_set_mode_filter(unsigned int flags,
 	if (flags & ~SECCOMP_FILTER_FLAG_MASK)
 		return -EINVAL;
 
+	/*
+	 * Installing a seccomp filter requires that the task has
+	 * CAP_SYS_ADMIN in its namespace or be running with no_new_privs.
+	 * This avoids scenarios where unprivileged tasks can affect the
+	 * behavior of privileged children.
+	 */
+	if (!task_no_new_privs(current) &&
+	    security_capable_noaudit(current_cred(), current_user_ns(),
+				     CAP_SYS_ADMIN) != 0)
+		return -EACCES;
+
 	/* Prepare the new filter before holding any locks. */
-	prepared = seccomp_prepare_user_filter(filter);
+	if (flags & SECCOMP_FILTER_FLAG_EBPF)
+		prepared = seccomp_prepare_ebpf(filter);
+	else
+		prepared = seccomp_prepare_user_filter(filter);
+
 	if (IS_ERR(prepared))
 		return PTR_ERR(prepared);
 
