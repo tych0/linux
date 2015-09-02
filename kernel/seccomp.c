@@ -65,6 +65,9 @@ struct seccomp_filter {
 /* Limit any path through the tree to 256KB worth of instructions. */
 #define MAX_INSNS_PER_PATH ((1 << 18) / sizeof(struct sock_filter))
 
+static long seccomp_install_filter(unsigned int flags,
+				   struct seccomp_filter *prepared);
+
 /*
  * Endianness is explicitly ignored and left for BPF program authors to manage
  * as per the specific architecture.
@@ -355,17 +358,6 @@ static struct seccomp_filter *seccomp_prepare_filter(struct sock_fprog *fprog)
 
 	BUG_ON(INT_MAX / fprog->len < sizeof(struct sock_filter));
 
-	/*
-	 * Installing a seccomp filter requires that the task has
-	 * CAP_SYS_ADMIN in its namespace or be running with no_new_privs.
-	 * This avoids scenarios where unprivileged tasks can affect the
-	 * behavior of privileged children.
-	 */
-	if (!task_no_new_privs(current) &&
-	    security_capable_noaudit(current_cred(), current_user_ns(),
-				     CAP_SYS_ADMIN) != 0)
-		return ERR_PTR(-EACCES);
-
 	/* Allocate a new seccomp_filter */
 	sfilter = kzalloc(sizeof(*sfilter), GFP_KERNEL | __GFP_NOWARN);
 	if (!sfilter)
@@ -509,7 +501,104 @@ static void seccomp_send_sigsys(int syscall, int reason)
 	info.si_syscall = syscall;
 	force_sig_info(SIGSYS, &info, current);
 }
+
 #endif	/* CONFIG_SECCOMP_FILTER */
+
+#if defined(CONFIG_BPF_SYSCALL) && defined(CONFIG_SECCOMP_FILTER)
+static struct seccomp_filter *seccomp_prepare_ebpf(int fd)
+{
+	struct seccomp_filter *ret;
+	struct bpf_prog *prog;
+
+	prog = bpf_prog_get(fd);
+	if (IS_ERR(prog))
+		return (struct seccomp_filter *) prog;
+
+	if (prog->type != BPF_PROG_TYPE_SECCOMP) {
+		bpf_prog_put(prog);
+		return ERR_PTR(-EINVAL);
+	}
+
+	ret = kzalloc(sizeof(*ret), GFP_KERNEL | __GFP_NOWARN);
+	if (!ret) {
+		bpf_prog_put(prog);
+		return ERR_PTR(-ENOMEM);
+	}
+
+	ret->prog = prog;
+	atomic_set(&ret->usage, 1);
+
+	/* Intentionally don't bpf_prog_put() here, because the underlying prog
+	 * is refcounted too and we're holding a reference from the struct
+	 * seccomp_filter object.
+	 */
+	return ret;
+}
+
+static long seccomp_ebpf_add_fd(struct seccomp_ebpf *ebpf)
+{
+	struct seccomp_filter *prepared;
+
+	prepared = seccomp_prepare_ebpf(ebpf->add_fd);
+	if (IS_ERR(prepared))
+		return PTR_ERR(prepared);
+
+	return seccomp_install_filter(ebpf->add_flags, prepared);
+}
+
+static long seccomp_mode_filter_ebpf(unsigned int cmd, const char __user *uargs)
+{
+	const struct seccomp_ebpf __user *uebpf;
+	struct seccomp_ebpf ebpf;
+	unsigned int size;
+	long ret = -EFAULT;
+
+	uebpf = (const struct seccomp_ebpf __user *) uargs;
+
+	if (get_user(size, &uebpf->size) != 0)
+		return -EFAULT;
+
+	/* If we're handed a bigger struct than we know of,
+	 * ensure all the unknown bits are 0 - i.e. new
+	 * user-space does not rely on any kernel feature
+	 * extensions we dont know about yet.
+	 */
+	if (size > sizeof(ebpf)) {
+		unsigned char __user *addr;
+		unsigned char __user *end;
+		unsigned char val;
+
+		addr = (void __user *)uebpf + sizeof(ebpf);
+		end  = (void __user *)uebpf + size;
+
+		for (; addr < end; addr++) {
+			int err = get_user(val, addr);
+
+			if (err)
+				return err;
+			if (val)
+				return -E2BIG;
+		}
+		size = sizeof(ebpf);
+	}
+
+	if (copy_from_user(&ebpf, uebpf, size) != 0)
+		return -EFAULT;
+
+	switch (cmd) {
+	case SECCOMP_EBPF_ADD_FD:
+		ret = seccomp_ebpf_add_fd(&ebpf);
+		break;
+	}
+
+	return ret;
+}
+#else
+static long seccomp_mode_filter_ebpf(unsigned int cmd, const char __user *uargs)
+{
+	return -EINVAL;
+}
+#endif
 
 /*
  * Secure computing mode 1 allows only read/write/exit/sigreturn.
@@ -767,9 +856,7 @@ out:
 static long seccomp_set_mode_filter(unsigned int flags,
 				    const char __user *filter)
 {
-	const unsigned long seccomp_mode = SECCOMP_MODE_FILTER;
 	struct seccomp_filter *prepared = NULL;
-	long ret = -EINVAL;
 
 	/* Validate flags. */
 	if (flags & ~SECCOMP_FILTER_FLAG_MASK)
@@ -779,6 +866,26 @@ static long seccomp_set_mode_filter(unsigned int flags,
 	prepared = seccomp_prepare_user_filter(filter);
 	if (IS_ERR(prepared))
 		return PTR_ERR(prepared);
+
+	return seccomp_install_filter(flags, prepared);
+}
+
+static long seccomp_install_filter(unsigned int flags,
+				   struct seccomp_filter *prepared)
+{
+	const unsigned long seccomp_mode = SECCOMP_MODE_FILTER;
+	long ret = -EINVAL;
+
+	/*
+	 * Installing a seccomp filter requires that the task has
+	 * CAP_SYS_ADMIN in its namespace or be running with no_new_privs.
+	 * This avoids scenarios where unprivileged tasks can affect the
+	 * behavior of privileged children.
+	 */
+	if (!task_no_new_privs(current) &&
+	    security_capable_noaudit(current_cred(), current_user_ns(),
+				     CAP_SYS_ADMIN) != 0)
+		return -EACCES;
 
 	/*
 	 * Make sure we cannot change seccomp or nnp state via TSYNC
@@ -882,6 +989,8 @@ static long do_seccomp(unsigned int op, unsigned int flags,
 		return seccomp_set_mode_strict();
 	case SECCOMP_SET_MODE_FILTER:
 		return seccomp_set_mode_filter(flags, uargs);
+	case SECCOMP_MODE_FILTER_EBPF:
+		return seccomp_mode_filter_ebpf(flags, uargs);
 	default:
 		return -EINVAL;
 	}
