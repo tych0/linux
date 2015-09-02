@@ -506,6 +506,30 @@ struct bpf_prog *bpf_prog_get(u32 ufd)
 }
 EXPORT_SYMBOL_GPL(bpf_prog_get);
 
+int bpf_prog_set(u32 ufd, struct bpf_prog *new)
+{
+	struct fd f;
+	struct bpf_prog *prog;
+
+	f = fdget(ufd);
+
+	prog = get_prog(f);
+	if (!IS_ERR(prog) && prog)
+		bpf_prog_put(prog);
+
+	atomic_inc(&new->aux->refcnt);
+	f.file->private_data = new;
+	fdput(f);
+	return 0;
+}
+EXPORT_SYMBOL_GPL(bpf_prog_set);
+
+int bpf_new_fd(struct bpf_prog *prog, int flags)
+{
+	return anon_inode_getfd("bpf-prog", &bpf_prog_fops, prog, flags);
+}
+EXPORT_SYMBOL_GPL(bpf_new_fd);
+
 /* last field in 'union bpf_attr' used by this command */
 #define	BPF_PROG_LOAD_LAST_FIELD kern_version
 
@@ -572,7 +596,7 @@ static int bpf_prog_load(union bpf_attr *attr)
 	if (err < 0)
 		goto free_used_maps;
 
-	err = anon_inode_getfd("bpf-prog", &bpf_prog_fops, prog, O_RDWR | O_CLOEXEC);
+	err = bpf_new_fd(prog, O_RDWR | O_CLOEXEC);
 	if (err < 0)
 		/* failed to allocate fd */
 		goto free_used_maps;
