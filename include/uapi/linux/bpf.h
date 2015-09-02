@@ -107,6 +107,13 @@ enum bpf_cmd {
 	 * returns fd or negative error
 	 */
 	BPF_PROG_LOAD,
+
+	/* dump an existing bpf
+	 * err = bpf(BPF_PROG_DUMP, union bpf_attr *attr, u32 size)
+	 * Using attr->prog_fd, attr->dump_insn_cnt, attr->dump_insns
+	 * returns zero or negative error
+	 */
+	BPF_PROG_DUMP,
 };
 
 enum bpf_map_type {
@@ -159,6 +166,14 @@ union bpf_attr {
 		__u32		log_size;	/* size of user buffer */
 		__aligned_u64	log_buf;	/* user supplied buffer */
 		__u32		kern_version;	/* checked when prog_type=kprobe */
+	};
+
+	struct { /* anonymous struct used by BPF_PROG_DUMP command */
+		__u32		prog_fd;
+		__u32		dump_insn_cnt;
+		__aligned_u64	dump_insns;	/* user supplied buffer */
+		__u8		gpl_compatible;
+		__u64		prog_id;	/* unique id for this prog */
 	};
 } __attribute__((aligned(8)));
 
