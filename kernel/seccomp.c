@@ -377,6 +377,8 @@ static struct seccomp_filter *seccomp_prepare_filter(struct sock_fprog *fprog)
 	}
 
 	atomic_set(&sfilter->usage, 1);
+	atomic_set(&sfilter->prog->aux->refcnt, 1);
+	sfilter->prog->type = BPF_PROG_TYPE_SECCOMP;
 
 	return sfilter;
 }
@@ -469,7 +471,7 @@ void get_seccomp_filter(struct task_struct *tsk)
 static inline void seccomp_filter_free(struct seccomp_filter *filter)
 {
 	if (filter) {
-		bpf_prog_free(filter->prog);
+		bpf_prog_put(filter->prog);
 		kfree(filter);
 	}
 }
