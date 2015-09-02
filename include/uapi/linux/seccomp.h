@@ -13,9 +13,13 @@
 /* Valid operations for seccomp syscall. */
 #define SECCOMP_SET_MODE_STRICT	0
 #define SECCOMP_SET_MODE_FILTER	1
+#define SECCOMP_MODE_FILTER_EBPF	2
 
 /* Valid flags for SECCOMP_SET_MODE_FILTER */
 #define SECCOMP_FILTER_FLAG_TSYNC	1
+
+/* Valid cmds for SECCOMP_MODE_FILTER_EBPF */
+#define SECCOMP_EBPF_ADD_FD	0
 
 /*
  * All BPF programs must return a 32-bit value.
@@ -49,6 +53,18 @@ struct seccomp_data {
 	__u32 arch;
 	__u64 instruction_pointer;
 	__u64 args[6];
+};
+
+struct seccomp_ebpf {
+	unsigned int size;
+
+	union {
+		/* SECCOMP_EBPF_ADD_FD */
+		struct {
+			unsigned int	add_flags;
+			__u32		add_fd;
+		};
+	};
 };
 
 #endif /* _UAPI_LINUX_SECCOMP_H */
