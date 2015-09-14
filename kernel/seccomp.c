@@ -65,6 +65,7 @@ struct seccomp_filter {
 /* Limit any path through the tree to 256KB worth of instructions. */
 #define MAX_INSNS_PER_PATH ((1 << 18) / sizeof(struct sock_filter))
 
+static bool may_install_filter(void);
 static long seccomp_install_filter(unsigned int flags,
 				   struct seccomp_filter *prepared);
 
@@ -512,7 +513,7 @@ static struct seccomp_filter *seccomp_prepare_ebpf(int fd)
 
 	prog = bpf_prog_get(fd);
 	if (IS_ERR(prog))
-		return (struct seccomp_filter *) prog;
+		return ERR_CAST(prog);
 
 	if (prog->type != BPF_PROG_TYPE_SECCOMP) {
 		bpf_prog_put(prog);
@@ -551,7 +552,10 @@ static long seccomp_mode_filter_ebpf(unsigned int cmd, const char __user *uargs)
 	const struct seccomp_ebpf __user *uebpf;
 	struct seccomp_ebpf ebpf;
 	unsigned int size;
-	long ret = -EFAULT;
+	int ret;
+
+	if (!may_install_filter())
+		return -EACCES;
 
 	uebpf = (const struct seccomp_ebpf __user *) uargs;
 
@@ -589,6 +593,8 @@ static long seccomp_mode_filter_ebpf(unsigned int cmd, const char __user *uargs)
 	case SECCOMP_EBPF_ADD_FD:
 		ret = seccomp_ebpf_add_fd(&ebpf);
 		break;
+	default:
+		ret = -EINVAL;
 	}
 
 	return ret;
@@ -840,42 +846,8 @@ out:
 }
 
 #ifdef CONFIG_SECCOMP_FILTER
-/**
- * seccomp_set_mode_filter: internal function for setting seccomp filter
- * @flags:  flags to change filter behavior
- * @filter: struct sock_fprog containing filter
- *
- * This function may be called repeatedly to install additional filters.
- * Every filter successfully installed will be evaluated (in reverse order)
- * for each system call the task makes.
- *
- * Once current->seccomp.mode is non-zero, it may not be changed.
- *
- * Returns 0 on success or -EINVAL on failure.
- */
-static long seccomp_set_mode_filter(unsigned int flags,
-				    const char __user *filter)
+static bool may_install_filter(void)
 {
-	struct seccomp_filter *prepared = NULL;
-
-	/* Validate flags. */
-	if (flags & ~SECCOMP_FILTER_FLAG_MASK)
-		return -EINVAL;
-
-	/* Prepare the new filter before holding any locks. */
-	prepared = seccomp_prepare_user_filter(filter);
-	if (IS_ERR(prepared))
-		return PTR_ERR(prepared);
-
-	return seccomp_install_filter(flags, prepared);
-}
-
-static long seccomp_install_filter(unsigned int flags,
-				   struct seccomp_filter *prepared)
-{
-	const unsigned long seccomp_mode = SECCOMP_MODE_FILTER;
-	long ret = -EINVAL;
-
 	/*
 	 * Installing a seccomp filter requires that the task has
 	 * CAP_SYS_ADMIN in its namespace or be running with no_new_privs.
@@ -885,7 +857,17 @@ static long seccomp_install_filter(unsigned int flags,
 	if (!task_no_new_privs(current) &&
 	    security_capable_noaudit(current_cred(), current_user_ns(),
 				     CAP_SYS_ADMIN) != 0)
-		return -EACCES;
+		return false;
+
+	return true;
+}
+
+
+static long seccomp_install_filter(unsigned int flags,
+				   struct seccomp_filter *prepared)
+{
+	const unsigned long seccomp_mode = SECCOMP_MODE_FILTER;
+	long ret = -EINVAL;
 
 	/*
 	 * Make sure we cannot change seccomp or nnp state via TSYNC
@@ -914,6 +896,38 @@ out:
 out_free:
 	seccomp_filter_free(prepared);
 	return ret;
+}
+/**
+ * seccomp_set_mode_filter: internal function for setting seccomp filter
+ * @flags:  flags to change filter behavior
+ * @filter: struct sock_fprog containing filter
+ *
+ * This function may be called repeatedly to install additional filters.
+ * Every filter successfully installed will be evaluated (in reverse order)
+ * for each system call the task makes.
+ *
+ * Once current->seccomp.mode is non-zero, it may not be changed.
+ *
+ * Returns 0 on success or -EINVAL on failure.
+ */
+static long seccomp_set_mode_filter(unsigned int flags,
+				    const char __user *filter)
+{
+	struct seccomp_filter *prepared = NULL;
+
+	/* Validate flags. */
+	if (flags & ~SECCOMP_FILTER_FLAG_MASK)
+		return -EINVAL;
+
+	if (!may_install_filter())
+		return -EACCES;
+
+	/* Prepare the new filter before holding any locks. */
+	prepared = seccomp_prepare_user_filter(filter);
+	if (IS_ERR(prepared))
+		return PTR_ERR(prepared);
+
+	return seccomp_install_filter(flags, prepared);
 }
 #else
 static inline long seccomp_set_mode_filter(unsigned int flags,
