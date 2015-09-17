@@ -1058,3 +1058,31 @@ long prctl_set_seccomp(unsigned long seccomp_mode, char __user *filter)
 	/* prctl interface doesn't have flags, so they are always zero. */
 	return do_seccomp(op, 0, uargs);
 }
+
+#if defined(CONFIG_CHECKPOINT_RESTORE) && defined(CONFIG_SECCOMP_FILTER)
+long seccomp_get_filter_fd(struct task_struct *task, long n)
+{
+	struct seccomp_filter *filter;
+	long fd;
+
+	if (task->seccomp.mode != SECCOMP_MODE_FILTER)
+		return -EINVAL;
+
+	filter = task->seccomp.filter;
+	while (n > 0 && filter) {
+		filter = filter->prev;
+		n--;
+	}
+
+	if (!filter)
+		return -EINVAL;
+
+	atomic_inc(&filter->usage);
+	fd = anon_inode_getfd("seccomp", &seccomp_fops, filter,
+			      O_RDONLY | O_CLOEXEC);
+	if (fd < 0)
+		seccomp_filter_decref(filter);
+
+	return fd;
+}
+#endif
