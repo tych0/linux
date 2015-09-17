@@ -25,6 +25,7 @@ struct seccomp_filter;
 struct seccomp {
 	int mode;
 	struct seccomp_filter *filter;
+	struct seccomp_filter *inherited_filter;
 };
 
 #ifdef CONFIG_HAVE_ARCH_SECCOMP_FILTER

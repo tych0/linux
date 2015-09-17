@@ -929,6 +929,72 @@ static long seccomp_set_mode_filter(unsigned int flags,
 
 	return seccomp_install_filter(flags, prepared);
 }
+
+static struct seccomp_filter *get_parent_filter(void)
+{
+	struct task_struct *parent;
+	struct seccomp_filter *ret = ERR_PTR(-EINVAL);
+
+	rcu_read_lock();
+
+	parent = current->real_parent;
+	if (!parent)
+		goto out_rcu;
+
+	spin_lock_irq(&parent->sighand->siglock);
+
+	if (parent->seccomp.mode != SECCOMP_MODE_FILTER)
+		goto out_siglock;
+
+	ret = parent->seccomp.filter;
+	BUG_ON(!ret);
+
+	get_seccomp_filter(parent);
+
+out_siglock:
+	spin_unlock_irq(&parent->sighand->siglock);
+out_rcu:
+	rcu_read_unlock();
+	return ret;
+}
+
+static long seccomp_inherit_filter(unsigned int flags)
+{
+	long ret = -EACCES;
+	struct seccomp_filter *filter;
+
+	spin_lock_irq(&current->sighand->siglock);
+
+	if (!seccomp_may_assign_mode(SECCOMP_MODE_FILTER))
+		goto out;
+
+	if (!may_install_filter())
+		goto out;
+
+	filter = get_parent_filter();
+	if (IS_ERR(filter)) {
+		ret = PTR_ERR(filter);
+		goto out;
+	}
+
+	ret = seccomp_attach_filter(flags, filter);
+	if (ret < 0) {
+		/* hmm, need to do something better, since the parent could
+		 * have died and we might have the only reference to this
+		 * filter. put_seccomp_filter is a bit awkward, though.
+		 */
+		atomic_dec(&filter->usage);
+		goto out;
+	}
+
+	seccomp_assign_mode(current, SECCOMP_MODE_FILTER);
+
+	ret = 0;
+
+out:
+	spin_unlock_irq(&current->sighand->siglock);
+	return ret;
+}
 #else
 static inline long seccomp_set_mode_filter(unsigned int flags,
 					   const char __user *filter)
