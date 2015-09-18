@@ -165,6 +165,20 @@ SYSCALL_DEFINE5(kcmp, pid_t, pid1, pid_t, pid2, int, type,
 		ret = -EOPNOTSUPP;
 #endif
 		break;
+	case KCMP_FILE_PRIVATE_DATA: {
+		struct file *filp1, *filp2;
+
+		filp1 = get_file_raw_ptr(task1, idx1);
+		filp2 = get_file_raw_ptr(task2, idx2);
+
+		if (filp1 && filp2)
+			ret = kcmp_ptr(filp1->private_data,
+				       filp2->private_data,
+				       KCMP_FILE_PRIVATE_DATA);
+		else
+			ret = -EBADF;
+		break;
+	}
 	default:
 		ret = -EINVAL;
 		break;
