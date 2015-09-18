@@ -410,6 +410,8 @@ int bpf_prog_create(struct bpf_prog **pfp, struct sock_fprog_kern *fprog);
 int bpf_prog_create_from_user(struct bpf_prog **pfp, struct sock_fprog *fprog,
 			      bpf_aux_classic_check_t trans);
 void bpf_prog_destroy(struct bpf_prog *fp);
+int bpf_prog_store_orig_filter(struct bpf_prog *fp,
+			       const struct sock_fprog *fprog);
 
 int sk_attach_filter(struct sock_fprog *fprog, struct sock *sk);
 int sk_attach_bpf(u32 ufd, struct sock *sk);

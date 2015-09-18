@@ -337,6 +337,14 @@ static inline void seccomp_sync_threads(void)
 	}
 }
 
+static inline void seccomp_filter_free(struct seccomp_filter *filter)
+{
+	if (filter) {
+		bpf_prog_destroy(filter->prog);
+		kfree(filter);
+	}
+}
+
 /**
  * seccomp_prepare_filter: Prepares a seccomp filter for use.
  * @fprog: BPF program to install
@@ -374,6 +382,14 @@ static struct seccomp_filter *seccomp_prepare_filter(struct sock_fprog *fprog)
 	if (ret < 0) {
 		kfree(sfilter);
 		return ERR_PTR(ret);
+	}
+
+	if (config_enabled(CONFIG_CHECKPOINT_RESTORE)) {
+		ret = bpf_prog_store_orig_filter(sfilter->prog, fprog);
+		if (ret < 0) {
+			seccomp_filter_free(sfilter);
+			return ERR_PTR(ret);
+		}
 	}
 
 	atomic_set(&sfilter->usage, 1);
@@ -464,14 +480,6 @@ void get_seccomp_filter(struct task_struct *tsk)
 		return;
 	/* Reference count is bounded by the number of total processes. */
 	atomic_inc(&orig->usage);
-}
-
-static inline void seccomp_filter_free(struct seccomp_filter *filter)
-{
-	if (filter) {
-		bpf_prog_free(filter->prog);
-		kfree(filter);
-	}
 }
 
 /* put_seccomp_filter - decrements the ref count of tsk->seccomp.filter */
