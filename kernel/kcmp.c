@@ -11,6 +11,7 @@
 #include <linux/bug.h>
 #include <linux/err.h>
 #include <linux/kcmp.h>
+#include <linux/seccomp.h>
 
 #include <asm/unistd.h>
 
@@ -165,6 +166,32 @@ SYSCALL_DEFINE5(kcmp, pid_t, pid1, pid_t, pid2, int, type,
 		ret = -EOPNOTSUPP;
 #endif
 		break;
+	case KCMP_SECCOMP_FD: {
+		struct file *filp1, *filp2;
+
+		filp1 = get_file_raw_ptr(task1, idx1);
+		filp2 = get_file_raw_ptr(task2, idx2);
+
+		if (filp1 && filp2) {
+			struct seccomp_filter *filter1, *filter2;
+
+			filter1 = seccomp_filter_from_file(filp1);
+			if (IS_ERR(filter1)) {
+				ret = PTR_ERR(filter1);
+				break;
+			}
+
+			filter2 = seccomp_filter_from_file(filp2);
+			if (IS_ERR(filter2)) {
+				ret = PTR_ERR(filter2);
+				break;
+			}
+
+			ret = kcmp_ptr(filter1, filter2, KCMP_SECCOMP_FD);
+		} else
+			ret = -EBADF;
+		break;
+	}
 	default:
 		ret = -EINVAL;
 		break;
