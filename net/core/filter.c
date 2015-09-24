@@ -845,8 +845,7 @@ int bpf_prog_store_orig_filter(struct bpf_prog *fp,
 	fkprog = fp->orig_prog;
 	fkprog->len = fprog->len;
 
-	fkprog->filter = kmemdup(fp->insns, fsize,
-				 GFP_KERNEL | __GFP_NOWARN);
+	fkprog->filter = memdup_user(fprog->filter, fsize);
 	if (!fkprog->filter) {
 		kfree(fp->orig_prog);
 		return -ENOMEM;
