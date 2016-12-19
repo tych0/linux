@@ -2736,7 +2736,7 @@
 
 	nox2apic	[X86-64,APIC] Do not enable x2APIC mode.
 
-	noxpfo		[X86-64] Disable eXclusive Page Frame Ownership (XPFO)
+	noxpfo		[X86-64,ARM64] Disable eXclusive Page Frame Ownership (XPFO)
 			Physical pages mapped into user applications will also be mapped in
 			the kernel's address space if CONFIG_XPFO was enabled.
 

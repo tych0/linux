@@ -32,6 +32,8 @@ void xpfo_free_pages(struct page *page, int order);
 
 bool xpfo_page_is_unmapped(struct page *page);
 
+bool xpfo_enabled(void);
+
 #else /* !CONFIG_XPFO */
 
 static inline void xpfo_kmap(void *kaddr, struct page *page) { }
@@ -41,6 +43,7 @@ static inline void xpfo_free_pages(struct page *page, int order) { }
 
 static inline bool xpfo_page_is_unmapped(struct page *page) { return false; }
 
+static inline bool xpfo_enabled(void) { return false; }
 #endif /* CONFIG_XPFO */
 
 #endif /* _LINUX_XPFO_H */
