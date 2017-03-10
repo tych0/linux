@@ -443,6 +443,21 @@ config GCC_PLUGIN_STRUCTLEAK_VERBOSE
 	  initialized. Since not all existing initializers are detected
 	  by the plugin, this can produce false positive warnings.
 
+config ARCH_HAS_STACKLEAK
+	def_bool n
+
+config GCC_PLUGIN_STACKLEAK
+	bool "Zero the kernel stack after syscalls"
+	depends on GCC_PLUGINS
+	depends on ARCH_HAS_STACKLEAK
+	help
+	  This plugin zero-initializes the kernel stack after every system call. This
+	  can prevent some classes of information exposures.
+
+	  This plugin was ported from grsecurity/PaX. More information at:
+	   * https://grsecurity.net/
+	   * https://pax.grsecurity.net/
+
 config HAVE_CC_STACKPROTECTOR
 	bool
 	help

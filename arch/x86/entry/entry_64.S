@@ -58,6 +58,62 @@ ENDPROC(native_usergs_sysret64)
 #endif
 .endm
 
+.macro erase_kstack
+#ifdef CONFIG_GCC_PLUGIN_STACKLEAK
+	call erase_kstack
+#endif
+.endm
+
+#ifdef CONFIG_GCC_PLUGIN_STACKLEAK
+ENTRY(erase_kstack)
+	pushq	%rdi
+	pushq	%rcx
+	pushq	%rax
+	pushq	%r11
+
+	movq PER_CPU_VAR(current_task), %r11
+	mov	TASK_lowest_stack(%r11), %rdi
+	mov	$-0xBEEF, %rax
+	std
+
+1:	mov	%edi, %ecx
+	and	$THREAD_SIZE_asm - 1, %ecx
+	shr	$3, %ecx
+	repne	scasq
+	jecxz	2f
+
+	cmp	$2*8, %ecx
+	jc	2f
+
+	mov	$2*8, %ecx
+	repe	scasq
+	jecxz	2f
+	jne	1b
+
+2:	cld
+	or	$2*8, %rdi
+	mov	%esp, %ecx
+	sub	%edi, %ecx
+
+	cmp	$THREAD_SIZE_asm, %rcx
+	jb	3f
+	ud2
+3:
+
+	shr	$3, %ecx
+	rep	stosq
+
+	mov	TASK_thread_sp0(%r11), %rdi
+	sub	$256, %rdi
+	mov	%rdi, TASK_lowest_stack(%r11)
+
+	popq	%r11
+	popq	%rax
+	popq	%rcx
+	popq	%rdi
+ENDPROC(erase_kstack)
+#endif
+
 /*
  * When dynamic function tracer is enabled it will add a breakpoint
  * to all locations that it is about to modify, sync CPUs, update
@@ -218,6 +274,10 @@ entry_SYSCALL_64_fastpath:
 	testl	$_TIF_ALLWORK_MASK, TASK_TI_flags(%r11)
 	jnz	1f
 
+#ifdef CONFIG_GCC_PLUGIN_STACKLEACK
+	erase_kstack
+#endif
+
 	LOCKDEP_SYS_EXIT
 	TRACE_IRQS_ON		/* user mode is traced as IRQs on */
 	movq	RIP(%rsp), %rcx
@@ -246,6 +306,10 @@ entry_SYSCALL64_slow_path:
 	call	do_syscall_64		/* returns with IRQs disabled */
 
 return_from_SYSCALL_64:
+#ifdef CONFIG_GCC_PLUGIN_STACKLEAK
+	erase_kstack
+#endif
+
 	RESTORE_EXTRA_REGS
 	TRACE_IRQS_IRETQ		/* we're about to change IF */
 
@@ -416,6 +480,9 @@ ENTRY(ret_from_fork)
 2:
 	leaq	FRAME_OFFSET(%rsp),%rdi	/* pt_regs pointer */
 	call	syscall_return_slowpath	/* returns with IRQs disabled */
+#ifdef CONFIG_GCC_PLUGIN_STACKLEAK
+	erase_kstack
+#endif
 	TRACE_IRQS_ON			/* user mode is traced as IRQS on */
 	SWAPGS
 	FRAME_END
@@ -529,6 +596,8 @@ ret_from_intr:
 GLOBAL(retint_user)
 	mov	%rsp,%rdi
 	call	prepare_exit_to_usermode
+# PaX has this here but commented out. Why?
+#	pax_erase_kstack
 	TRACE_IRQS_IRETQ
 	SWAPGS
 	jmp	restore_regs_and_iret
