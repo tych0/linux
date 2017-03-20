@@ -12,6 +12,10 @@
 
 #include <linux/fs.h>
 
+#ifdef CONFIG_IMA_PER_NAMESPACE
+#include <linux/mount.h>
+#endif
+
 enum integrity_status {
 	INTEGRITY_PASS = 0,
 	INTEGRITY_FAIL,
@@ -42,5 +46,14 @@ static inline void integrity_load_keys(void)
 {
 }
 #endif /* CONFIG_INTEGRITY */
+
+#ifdef CONFIG_IMA_PER_NAMESPACE
+extern void mnt_namespace_dying(struct mnt_namespace *ns);
+#else
+static inline void mnt_namespace_dying(struct mnt_namespace *ns);
+{
+	return;
+}
+#endif /* CONFIG_IMA_PER_NAMESPACE */
 
 #endif /* _LINUX_INTEGRITY_H */

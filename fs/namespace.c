@@ -15,6 +15,7 @@
 #include <linux/user_namespace.h>
 #include <linux/namei.h>
 #include <linux/security.h>
+#include <linux/integrity.h>
 #include <linux/cred.h>
 #include <linux/idr.h>
 #include <linux/init.h>		/* init_rootfs */
@@ -3283,9 +3284,17 @@ void put_mnt_ns(struct mnt_namespace *ns)
 {
 	if (!atomic_dec_and_test(&ns->count))
 		return;
+	mnt_namespace_dying(ns);
 	drop_collected_mounts(&ns->root->mnt);
 	free_mnt_ns(ns);
 }
+
+#ifdef CONFIG_IMA_PER_NAMESPACE
+unsigned int mnt_namespace_inum(struct mnt_namespace *ns)
+{
+	return ns->ns.inum;
+}
+#endif
 
 struct vfsmount *kern_mount_data(struct file_system_type *type, void *data)
 {

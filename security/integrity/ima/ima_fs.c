@@ -17,6 +17,9 @@
  */
 #include <linux/fcntl.h>
 #include <linux/slab.h>
+#ifdef CONFIG_IMA_PER_NAMESPACE
+#include <linux/mnt_namespace.h>
+#endif
 #include <linux/module.h>
 #include <linux/seq_file.h>
 #include <linux/rculist.h>
@@ -39,6 +42,18 @@ static int __init default_canonical_fmt_setup(char *str)
 __setup("ima_canonical_fmt", default_canonical_fmt_setup);
 
 static int valid_policy = 1;
+
+#ifdef CONFIG_IMA_PER_NAMESPACE
+// XXX: should this live on the mount ns directly?
+struct ima_ns_policy {
+	struct list_head list;
+	struct mnt_namespace *mnt_ns;
+	struct dentry *dentry;
+};
+
+static LIST_HEAD(ns_policies);
+#endif
+
 #define TMPBUFLEN 12
 static ssize_t ima_show_htable_value(char __user *buf, size_t count,
 				     loff_t *ppos, atomic_long_t *val)
@@ -361,11 +376,13 @@ out:
 }
 
 static struct dentry *ima_dir;
+static struct dentry *ima_namespaces_dir;
 static struct dentry *binary_runtime_measurements;
 static struct dentry *ascii_runtime_measurements;
 static struct dentry *runtime_measurements_count;
 static struct dentry *violations;
 static struct dentry *ima_policy;
+static struct dentry *namespaces;
 
 enum ima_fs_flags {
 	IMA_FS_BUSY,
@@ -451,10 +468,140 @@ static const struct file_operations ima_measure_policy_ops = {
 	.llseek = generic_file_llseek,
 };
 
+#ifdef CONFIG_IMA_PER_NAMESPACE
+// XXX: needs to be per namespace :)
+static const struct file_operations ima_namespace_policy_ops = {
+	.open = ima_open_policy,
+	.write = ima_write_policy,
+	.read = seq_read,
+	.release = ima_release_policy,
+	.llseek = generic_file_llseek,
+};
+
+static int ima_open_namespaces(struct inode *inode, struct file *flip)
+{
+	if (test_and_set_bit(IMA_FS_BUSY, &ima_fs_flags))
+		return -EBUSY;
+	return 0;
+}
+
+static ssize_t ima_write_namespaces(struct file *file, const char __user *buf,
+				    size_t datalen, loff_t *ppos)
+{
+	pid_t pid;
+	struct task_struct *task;
+	struct ima_ns_policy *new;
+	ssize_t ret;
+	char kbuf[50];
+
+	if (datalen >= sizeof(kbuf))
+		return -EINVAL;
+
+	if (copy_from_user(kbuf, buf, datalen))
+		return -EFAULT;
+	kbuf[datalen] = 0;
+
+	// TODO: we said this should be nsid, but it's not immediately obvious
+	// how to get a list of all the mount namespaces to search through.
+	// Maybe we don't have to since the nsid exposed to userspace is just
+	// the inode on procfs.
+	if (kstrtoint(strstrip(kbuf), 0, &pid) || pid < 0)
+		return -EINVAL;
+
+	rcu_read_lock();
+	task = find_task_by_vpid(pid);
+	if (task)
+		get_task_struct(task);
+	rcu_read_unlock();
+
+	if (!task)
+		return -ESRCH;
+
+	new = kzalloc(sizeof(struct ima_ns_policy), GFP_KERNEL);
+	if (!new)
+		return -ENOMEM;
+	new->mnt_ns = task->nsproxy->mnt_ns;
+	INIT_LIST_HEAD(&new->list);
+
+	// XXX: explicitly don't get_mnt_ns() here, so that when the refcount
+	// gets to 0 we call our free-ing routines.
+	// get_mnt_ns(new->mnt_ns);
+
+	ret = snprintf(kbuf, sizeof(kbuf), "%u", mnt_namespace_inum(new->mnt_ns));
+	if (ret < 0)
+		return -EINVAL;
+
+	ret = 0;
+	new->dentry = securityfs_create_file(kbuf, S_IWUSR, ima_namespaces_dir,
+					     NULL, &ima_namespace_policy_ops);
+	if (IS_ERR(new->dentry))
+		ret = PTR_ERR(new->dentry);
+
+	if (ret) {
+		kfree(new);
+	} else {
+		list_add(&new->list, &ns_policies);
+		ret = datalen;
+	}
+
+	put_task_struct(task);
+	return ret;
+}
+
+static int ima_release_namespaces(struct inode *inode, struct file *file)
+{
+	clear_bit(IMA_FS_BUSY, &ima_fs_flags);
+	return 0;
+}
+
+static const struct file_operations ima_namespaces_ops = {
+	.open = ima_open_namespaces,
+	.write = ima_write_namespaces,
+	.release = ima_release_namespaces,
+	.llseek = generic_file_llseek,
+};
+
+void mnt_namespace_dying(struct mnt_namespace *ns)
+{
+	struct ima_ns_policy *pos;
+	list_for_each_entry(pos, &ns_policies, list) {
+		if (pos->mnt_ns != ns)
+			continue;
+
+		list_del(&pos->list);
+		securityfs_remove(pos->dentry);
+		kfree(pos);
+		return;
+	}
+}
+
+static int create_ima_namespace_files(void)
+{
+	ima_namespaces_dir = securityfs_create_dir("ns", ima_dir);
+	if (IS_ERR(ima_namespaces_dir))
+		return -1;
+
+	namespaces = securityfs_create_file("namespaces", S_IWUSR, ima_dir,
+					    NULL, &ima_namespaces_ops);
+	if (IS_ERR(namespaces))
+		return -1;
+
+	return 0;
+}
+#else
+static inline int create_ima_namespace_files(void)
+{
+	return 0;
+}
+#endif // CONFIG_IMA_PER_NAMESPACE
+
 int __init ima_fs_init(void)
 {
 	ima_dir = securityfs_create_dir("ima", NULL);
 	if (IS_ERR(ima_dir))
+		return -1;
+
+	if (create_ima_namespace_files() < 0)
 		return -1;
 
 	binary_runtime_measurements =
@@ -497,6 +644,8 @@ out:
 	securityfs_remove(ascii_runtime_measurements);
 	securityfs_remove(binary_runtime_measurements);
 	securityfs_remove(ima_dir);
+	securityfs_remove(ima_namespaces_dir);
 	securityfs_remove(ima_policy);
+	securityfs_remove(namespaces);
 	return -1;
 }

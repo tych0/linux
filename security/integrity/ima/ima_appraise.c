@@ -26,6 +26,8 @@ static int __init default_appraise_setup(char *str)
 		ima_appraise = IMA_APPRAISE_LOG;
 	else if (strncmp(str, "fix", 3) == 0)
 		ima_appraise = IMA_APPRAISE_FIX;
+	else if (strncmp(str, "namespaces", 9) == 0)
+		ima_appraise = IMA_APPRAISE_NAMESPACES;
 	return 1;
 }
 
