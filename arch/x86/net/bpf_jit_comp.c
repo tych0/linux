@@ -25,13 +25,31 @@ extern u8 sk_load_byte_positive_offset[];
 extern u8 sk_load_word_negative_offset[], sk_load_half_negative_offset[];
 extern u8 sk_load_byte_negative_offset[];
 
+#define CONFIG_EBPF_JIT_HASH_OUTPUT
+#ifdef CONFIG_EBPF_JIT_HASH_OUTPUT
+register u8 hash asm ("r15");
+#endif
+
 static u8 *emit_code(u8 *ptr, u32 bytes, unsigned int len)
 {
-	if (len == 1)
+	if (len == 1) {
+#ifdef CONFIG_EBPF_JIT_HASH_OUTPUT
+		hash ^= bytes;
+#endif
 		*ptr = bytes;
-	else if (len == 2)
+	} else if (len == 2) {
+#ifdef CONFIG_EBPF_JIT_HASH_OUTPUT
+		hash ^= (bytes >> 8);
+		hash ^= bytes;
+#endif
 		*(u16 *)ptr = bytes;
-	else {
+	} else {
+#ifdef CONFIG_EBPF_JIT_HASH_OUTPUT
+		hash ^= (bytes >> 24);
+		hash ^= (bytes >> 16);
+		hash ^= (bytes >> 8);
+		hash ^= bytes;
+#endif
 		*(u32 *)ptr = bytes;
 		barrier();
 	}
@@ -1085,6 +1103,25 @@ common_load:
 	return proglen;
 }
 
+#ifdef CONFIG_EBPF_JIT_HASH_OUTPUT
+static bool check_jit_hash(u8 *buf, u32 len)
+{
+	u8 accum = 0;
+	u32 i;
+
+	for (i = 0; i < len; i++) {
+		accum ^= buf[i];
+	}
+
+	return hash == accum;
+}
+#else
+static inline check_jit_hash(u8 *buf, u32 len)
+{
+	return true;
+}
+#endif
+
 struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 {
 	struct bpf_binary_header *header = NULL;
@@ -1132,6 +1169,9 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 	 * pass to emit the final image
 	 */
 	for (pass = 0; pass < 10 || image; pass++) {
+#ifdef CONFIG_EBPF_JIT_HASH_OUTPUT
+		hash = 0;
+#endif
 		proglen = do_jit(prog, addrs, image, oldproglen, &ctx);
 		if (proglen <= 0) {
 			image = NULL;
@@ -1166,6 +1206,8 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 	if (image) {
 		bpf_flush_icache(header, image + proglen);
 		bpf_jit_binary_lock_ro(header);
+		if (!check_jit_hash(image, proglen))
+			BUG();
 		prog->bpf_func = (void *)image;
 		prog->jited = 1;
 	} else {
