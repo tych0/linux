@@ -14,6 +14,13 @@
 #include <asm/cacheflush.h>
 #include <linux/bpf.h>
 
+#define CONFIG_EBPF_JIT_HASH_OUTPUT
+#ifdef CONFIG_EBPF_JIT_HASH_OUTPUT
+#define __jit_inline __always_inline
+#else
+#define __jit_inline
+#endif
+
 int bpf_jit_enable __read_mostly;
 
 /*
@@ -25,13 +32,38 @@ extern u8 sk_load_byte_positive_offset[];
 extern u8 sk_load_word_negative_offset[], sk_load_half_negative_offset[];
 extern u8 sk_load_byte_negative_offset[];
 
-static u8 *emit_code(u8 *ptr, u32 bytes, unsigned int len)
+static __jit_inline u8 *emit_code(u8 *ptr, u32 bytes, unsigned int len)
 {
-	if (len == 1)
+	if (len == 1) {
+#ifdef CONFIG_EBPF_JIT_HASH_OUTPUT
+		/* some hash */
+		asm("xor %%ax,%%bx  ;" : : "a"(bytes) : "cc");
+#endif
 		*ptr = bytes;
-	else if (len == 2)
+	} else if (len == 2) {
+#ifdef CONFIG_EBPF_JIT_HASH_OUTPUT
+		/* xor is commutative */
+		asm("xor %%ax,%%bx ;"
+		    "shr $8,%%eax  ;"
+		    "xor %%ax,%%bx;"
+		    :
+		    : "a"(bytes)
+		    : "cc");
+#endif
 		*(u16 *)ptr = bytes;
-	else {
+	} else {
+#ifdef CONFIG_EBPF_JIT_HASH_OUTPUT
+		asm("xor %%ax,%%bx;"
+		    "shr $8,%%eax  ;"
+		    "xor %%ax,%%bx;"
+		    "shr $8,%%eax  ;"
+		    "xor %%ax,%%bx;"
+		    "shr $8,%%eax  ;"
+		    "xor %%ax,%%bx;"
+		    :
+		    : "a"(bytes)
+		    : "cc");
+#endif
 		*(u32 *)ptr = bytes;
 		barrier();
 	}
@@ -54,12 +86,12 @@ static u8 *emit_code(u8 *ptr, u32 bytes, unsigned int len)
 #define EMIT4_off32(b1, b2, b3, b4, off) \
 	do {EMIT4(b1, b2, b3, b4); EMIT(off, 4); } while (0)
 
-static bool is_imm8(int value)
+static __jit_inline bool is_imm8(int value)
 {
 	return value <= 127 && value >= -128;
 }
 
-static bool is_simm32(s64 value)
+static __jit_inline bool is_simm32(s64 value)
 {
 	return value == (s64) (s32) value;
 }
@@ -70,7 +102,7 @@ static bool is_simm32(s64 value)
 		EMIT3(add_2mod(0x48, DST, SRC), 0x89, add_2reg(0xC0, DST, SRC)); \
 	} while (0)
 
-static int bpf_size_to_x86_bytes(int bpf_size)
+static __jit_inline int bpf_size_to_x86_bytes(int bpf_size)
 {
 	if (bpf_size == BPF_W)
 		return 4;
@@ -96,7 +128,7 @@ static int bpf_size_to_x86_bytes(int bpf_size)
 #define X86_JGE 0x7D
 #define X86_JG  0x7F
 
-static void bpf_flush_icache(void *start, void *end)
+static __jit_inline void bpf_flush_icache(void *start, void *end)
 {
 	mm_segment_t old_fs = get_fs();
 
@@ -141,7 +173,7 @@ static const int reg2hex[] = {
  * which need extra byte of encoding.
  * rax,rcx,...,rbp have simpler encoding
  */
-static bool is_ereg(u32 reg)
+static __jit_inline bool is_ereg(u32 reg)
 {
 	return (1 << reg) & (BIT(BPF_REG_5) |
 			     BIT(AUX_REG) |
@@ -152,14 +184,14 @@ static bool is_ereg(u32 reg)
 }
 
 /* add modifiers if 'reg' maps to x64 registers r8..r15 */
-static u8 add_1mod(u8 byte, u32 reg)
+static __jit_inline u8 add_1mod(u8 byte, u32 reg)
 {
 	if (is_ereg(reg))
 		byte |= 1;
 	return byte;
 }
 
-static u8 add_2mod(u8 byte, u32 r1, u32 r2)
+static __jit_inline u8 add_2mod(u8 byte, u32 r1, u32 r2)
 {
 	if (is_ereg(r1))
 		byte |= 1;
@@ -169,13 +201,13 @@ static u8 add_2mod(u8 byte, u32 r1, u32 r2)
 }
 
 /* encode 'dst_reg' register into x64 opcode 'byte' */
-static u8 add_1reg(u8 byte, u32 dst_reg)
+static __jit_inline u8 add_1reg(u8 byte, u32 dst_reg)
 {
 	return byte + reg2hex[dst_reg];
 }
 
 /* encode 'dst_reg' and 'src_reg' registers into x64 opcode 'byte' */
-static u8 add_2reg(u8 byte, u32 dst_reg, u32 src_reg)
+static __jit_inline u8 add_2reg(u8 byte, u32 dst_reg, u32 src_reg)
 {
 	return byte + reg2hex[dst_reg] + (reg2hex[src_reg] << 3);
 }
@@ -206,7 +238,7 @@ struct jit_context {
 /* emit x64 prologue code for BPF program and check it's size.
  * bpf_tail_call helper will skip it while jumping into another program
  */
-static void emit_prologue(u8 **pprog)
+static __jit_inline void emit_prologue(u8 **pprog)
 {
 	u8 *prog = *pprog;
 	int cnt = 0;
@@ -264,7 +296,7 @@ static void emit_prologue(u8 **pprog)
  *   goto *(prog->bpf_func + prologue_size);
  * out:
  */
-static void emit_bpf_tail_call(u8 **pprog)
+static __jit_inline void emit_bpf_tail_call(u8 **pprog)
 {
 	u8 *prog = *pprog;
 	int label1, label2, label3;
@@ -328,7 +360,7 @@ static void emit_bpf_tail_call(u8 **pprog)
 }
 
 
-static void emit_load_skb_data_hlen(u8 **pprog)
+static __jit_inline void emit_load_skb_data_hlen(u8 **pprog)
 {
 	u8 *prog = *pprog;
 	int cnt = 0;
@@ -347,7 +379,7 @@ static void emit_load_skb_data_hlen(u8 **pprog)
 	*pprog = prog;
 }
 
-static int do_jit(struct bpf_prog *bpf_prog, int *addrs, u8 *image,
+static __jit_inline int do_jit(struct bpf_prog *bpf_prog, int *addrs, u8 *image,
 		  int oldproglen, struct jit_context *ctx)
 {
 	struct bpf_insn *insn = bpf_prog->insnsi;
@@ -1085,6 +1117,28 @@ common_load:
 	return proglen;
 }
 
+#ifdef CONFIG_EBPF_JIT_HASH_OUTPUT
+register u8 hash asm ("rbx");
+
+static bool check_jit_hash(u8 *buf, u32 len)
+{
+	u8 accum = 0;
+	u32 i;
+
+	for (i = 0; i < len; i++) {
+		accum ^= buf[i];
+	}
+
+	printk("hash: %x, accum: %x\n", hash, accum);
+	return hash == accum;
+}
+#else
+static inline check_jit_hash(u8 *buf, u32 len)
+{
+	return true;
+}
+#endif
+
 struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 {
 	struct bpf_binary_header *header = NULL;
@@ -1132,6 +1186,9 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 	 * pass to emit the final image
 	 */
 	for (pass = 0; pass < 10 || image; pass++) {
+#ifdef CONFIG_EBPF_JIT_HASH_OUTPUT
+		hash = 0;
+#endif
 		proglen = do_jit(prog, addrs, image, oldproglen, &ctx);
 		if (proglen <= 0) {
 			image = NULL;
@@ -1166,6 +1223,8 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 	if (image) {
 		bpf_flush_icache(header, image + proglen);
 		bpf_jit_binary_lock_ro(header);
+		if (!check_jit_hash(image, proglen))
+			BUG();
 		prog->bpf_func = (void *)image;
 		prog->jited = 1;
 	} else {
