@@ -45,7 +45,6 @@
 	(a) >= (FIELD_SIZEOF(struct integrity_iint_cache, measured_pcrs) * 8))
 
 int ima_policy_flag;
-static int temp_ima_appraise;
 
 #define MAX_LSM_RULES 6
 enum lsm_rule_types { LSM_OBJ_USER, LSM_OBJ_ROLE, LSM_OBJ_TYPE,
@@ -147,10 +146,9 @@ static struct ima_rule_entry default_appraise_rules[] = {
 #endif
 };
 
-static LIST_HEAD(ima_default_rules);
+LIST_HEAD(ima_default_rules);
 static LIST_HEAD(ima_policy_rules);
-static LIST_HEAD(ima_temp_rules);
-static struct list_head *ima_rules;
+struct list_head *ima_rules;
 
 static int ima_policy __initdata;
 
@@ -196,6 +194,7 @@ static void ima_lsm_update_rules(void)
 	int result;
 	int i;
 
+	// XXX: need to figure out what to do here
 	list_for_each_entry(entry, &ima_policy_rules, list) {
 		for (i = 0; i < MAX_LSM_RULES; i++) {
 			if (!entry->lsm[i].rule)
@@ -376,7 +375,7 @@ int ima_match_policy(struct inode *inode, enum ima_hooks func, int mask,
  * out of a function or not call the function in the first place
  * can be made earlier.
  */
-void ima_update_policy_flag(void)
+void ima_update_policy_flag(struct list_head *ima_rules, int temp_ima_appraise)
 {
 	struct ima_rule_entry *entry;
 
@@ -398,7 +397,7 @@ void ima_update_policy_flag(void)
  */
 void __init ima_init_policy(void)
 {
-	int i, measure_entries, appraise_entries;
+	int i, measure_entries, appraise_entries, temp_ima_appraise = 0;
 
 	/* if !ima_policy set entries = 0 so we load NO default rules */
 	measure_entries = ima_policy ? ARRAY_SIZE(dont_measure_rules) : 0;
@@ -430,13 +429,13 @@ void __init ima_init_policy(void)
 	}
 
 	ima_rules = &ima_default_rules;
-	ima_update_policy_flag();
+	ima_update_policy_flag(ima_rules, temp_ima_appraise);
 }
 
 /* Make sure we have a valid policy, at least containing some rules. */
-int ima_check_policy(void)
+int ima_check_policy(struct list_head *ima_temp_rules)
 {
-	if (list_empty(&ima_temp_rules))
+	if (list_empty(ima_temp_rules))
 		return -EINVAL;
 	return 0;
 }
@@ -452,14 +451,17 @@ int ima_check_policy(void)
  * Policy rules are never deleted so ima_policy_flag gets zeroed only once when
  * we switch from the default policy to user defined.
  */
-void ima_update_policy(void)
+void ima_update_policy(struct ima_ns_entry *ent, struct list_head *ima_temp_rules, int temp_ima_appraise)
 {
-	struct list_head *first, *last, *policy;
+	struct list_head *first, *last, *policy, *rules;
 
 	/* append current policy with the new rules */
-	first = (&ima_temp_rules)->next;
-	last = (&ima_temp_rules)->prev;
-	policy = &ima_policy_rules;
+	first = ima_temp_rules->next;
+	last = ima_temp_rules->prev;
+	if (ent)
+		policy = &ent->policy_rules;
+	else
+		policy = &ima_policy_rules;
 
 	synchronize_rcu();
 
@@ -468,14 +470,16 @@ void ima_update_policy(void)
 	first->prev = policy->prev;
 	policy->prev = last;
 
-	/* prepare for the next policy rules addition */
-	INIT_LIST_HEAD(&ima_temp_rules);
+	rules = ent ? ent->rules : ima_rules;
 
-	if (ima_rules != policy) {
+	if (rules != policy) {
 		ima_policy_flag = 0;
-		ima_rules = policy;
+		if (ent)
+			ent->rules = policy;
+		else
+			ima_rules = policy;
 	}
-	ima_update_policy_flag();
+	ima_update_policy_flag(rules, temp_ima_appraise);
 }
 
 enum {
@@ -548,7 +552,7 @@ static void ima_log_string(struct audit_buffer *ab, char *key, char *value)
 	audit_log_format(ab, " ");
 }
 
-static int ima_parse_rule(char *rule, struct ima_rule_entry *entry)
+static int ima_parse_rule(char *rule, struct ima_rule_entry *entry, int *temp_ima_appraise)
 {
 	struct audit_buffer *ab;
 	char *from;
@@ -808,11 +812,11 @@ static int ima_parse_rule(char *rule, struct ima_rule_entry *entry)
 	if (!result && (entry->action == UNKNOWN))
 		result = -EINVAL;
 	else if (entry->func == MODULE_CHECK)
-		temp_ima_appraise |= IMA_APPRAISE_MODULES;
+		*temp_ima_appraise |= IMA_APPRAISE_MODULES;
 	else if (entry->func == FIRMWARE_CHECK)
-		temp_ima_appraise |= IMA_APPRAISE_FIRMWARE;
+		*temp_ima_appraise |= IMA_APPRAISE_FIRMWARE;
 	else if (entry->func == POLICY_CHECK)
-		temp_ima_appraise |= IMA_APPRAISE_POLICY;
+		*temp_ima_appraise |= IMA_APPRAISE_POLICY;
 	audit_log_format(ab, "res=%d", !result);
 	audit_log_end(ab);
 	return result;
@@ -825,7 +829,7 @@ static int ima_parse_rule(char *rule, struct ima_rule_entry *entry)
  * Avoid locking by allowing just one writer at a time in ima_write_policy()
  * Returns the length of the rule parsed, an error code on failure
  */
-ssize_t ima_parse_add_rule(char *rule)
+ssize_t ima_parse_add_rule(char *rule, struct list_head *rules, int *temp_ima_appraise)
 {
 	static const char op[] = "update_policy";
 	char *p;
@@ -849,7 +853,7 @@ ssize_t ima_parse_add_rule(char *rule)
 
 	INIT_LIST_HEAD(&entry->list);
 
-	result = ima_parse_rule(p, entry);
+	result = ima_parse_rule(p, entry, temp_ima_appraise);
 	if (result) {
 		kfree(entry);
 		integrity_audit_msg(AUDIT_INTEGRITY_STATUS, NULL,
@@ -858,7 +862,7 @@ ssize_t ima_parse_add_rule(char *rule)
 		return result;
 	}
 
-	list_add_tail(&entry->list, &ima_temp_rules);
+	list_add_tail(&entry->list, rules);
 
 	return len;
 }
@@ -869,13 +873,12 @@ ssize_t ima_parse_add_rule(char *rule)
  * different from the active one.  There is also only one user of
  * ima_delete_rules() at a time.
  */
-void ima_delete_rules(void)
+void ima_delete_rules(struct list_head *ima_temp_rules)
 {
 	struct ima_rule_entry *entry, *tmp;
 	int i;
 
-	temp_ima_appraise = 0;
-	list_for_each_entry_safe(entry, tmp, &ima_temp_rules, list) {
+	list_for_each_entry_safe(entry, tmp, ima_temp_rules, list) {
 		for (i = 0; i < MAX_LSM_RULES; i++)
 			kfree(entry->lsm[i].args_p);
 

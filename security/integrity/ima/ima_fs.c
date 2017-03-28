@@ -41,16 +41,10 @@ static int __init default_canonical_fmt_setup(char *str)
 }
 __setup("ima_canonical_fmt", default_canonical_fmt_setup);
 
-static int valid_policy = 1;
+extern struct list_head *ima_rules;
+extern struct list_head ima_default_rules;
 
 #ifdef CONFIG_IMA_PER_NAMESPACE
-// XXX: should this live on the mount ns directly?
-struct ima_ns_policy {
-	struct list_head list;
-	struct mnt_namespace *mnt_ns;
-	struct dentry *dentry;
-};
-
 static LIST_HEAD(ns_policies);
 #endif
 
@@ -287,7 +281,7 @@ static const struct file_operations ima_ascii_measurements_ops = {
 	.release = seq_release,
 };
 
-static ssize_t ima_read_policy(char *path)
+static ssize_t ima_read_policy(char *path, struct ima_ns_file *f)
 {
 	void *data;
 	char *datap;
@@ -309,7 +303,7 @@ static ssize_t ima_read_policy(char *path)
 	datap = data;
 	while (size > 0 && (p = strsep(&datap, "\n"))) {
 		pr_debug("rule: %s\n", p);
-		rc = ima_parse_add_rule(p);
+		rc = ima_parse_add_rule(p, &f->temp_rules, &f->temp_ima_appraise);
 		if (rc < 0)
 			break;
 		size -= rc;
@@ -329,6 +323,7 @@ static ssize_t ima_write_policy(struct file *file, const char __user *buf,
 {
 	char *data;
 	ssize_t result;
+	struct ima_ns_file *imaf = file->private_data;
 
 	if (datalen >= PAGE_SIZE)
 		datalen = PAGE_SIZE - 1;
@@ -354,7 +349,7 @@ static ssize_t ima_write_policy(struct file *file, const char __user *buf,
 		goto out_free;
 
 	if (data[0] == '/') {
-		result = ima_read_policy(data);
+		result = ima_read_policy(data, imaf);
 	} else if (ima_appraise & IMA_APPRAISE_POLICY) {
 		pr_err("IMA: signed policy file (specified as an absolute pathname) required\n");
 		integrity_audit_msg(AUDIT_INTEGRITY_STATUS, NULL, NULL,
@@ -363,14 +358,14 @@ static ssize_t ima_write_policy(struct file *file, const char __user *buf,
 		if (ima_appraise & IMA_APPRAISE_ENFORCE)
 			result = -EACCES;
 	} else {
-		result = ima_parse_add_rule(data);
+		result = ima_parse_add_rule(data, &imaf->temp_rules, &imaf->temp_ima_appraise);
 	}
 	mutex_unlock(&ima_write_mutex);
 out_free:
 	kfree(data);
 out:
 	if (result < 0)
-		valid_policy = 0;
+		imaf->valid_policy = 0;
 
 	return result;
 }
@@ -417,6 +412,23 @@ static int ima_open_policy(struct inode *inode, struct file *filp)
 	}
 	if (test_and_set_bit(IMA_FS_BUSY, &ima_fs_flags))
 		return -EBUSY;
+
+#ifdef CONFIG_IMA_PER_NAMESPACE
+	if (inode->i_private) {
+		struct ima_ns_file *f;
+
+		f = kmalloc(sizeof(struct ima_ns_file), GFP_KERNEL);
+		if (!f)
+			return -ENOMEM;
+
+		INIT_LIST_HEAD(&f->temp_rules);
+		f->ns = inode->i_private;
+		f->valid_policy = 1;
+
+		filp->private_data = f;
+	}
+#endif
+
 	return 0;
 }
 
@@ -429,28 +441,28 @@ static int ima_open_policy(struct inode *inode, struct file *filp)
  */
 static int ima_release_policy(struct inode *inode, struct file *file)
 {
-	const char *cause = valid_policy ? "completed" : "failed";
+	struct ima_ns_file *imaf = file->private_data;
+	const char *cause = imaf->valid_policy ? "completed" : "failed";
 
 	if ((file->f_flags & O_ACCMODE) == O_RDONLY)
-		return seq_release(inode, file);
+		return seq_release_private(inode, file);
 
-	if (valid_policy && ima_check_policy() < 0) {
+	if (imaf->valid_policy && ima_check_policy(&imaf->temp_rules) < 0) {
 		cause = "failed";
-		valid_policy = 0;
+		imaf->valid_policy = 0;
 	}
 
 	pr_info("IMA: policy update %s\n", cause);
 	integrity_audit_msg(AUDIT_INTEGRITY_STATUS, NULL, NULL,
-			    "policy_update", cause, !valid_policy, 0);
+			    "policy_update", cause, !imaf->valid_policy, 0);
 
-	if (!valid_policy) {
-		ima_delete_rules();
-		valid_policy = 1;
+	if (!imaf->valid_policy) {
+		ima_delete_rules(&imaf->temp_rules);
 		clear_bit(IMA_FS_BUSY, &ima_fs_flags);
 		return 0;
 	}
 
-	ima_update_policy();
+	ima_update_policy(imaf->ns, &imaf->temp_rules, imaf->temp_ima_appraise);
 #ifndef	CONFIG_IMA_WRITE_POLICY
 	securityfs_remove(ima_policy);
 	ima_policy = NULL;
@@ -469,19 +481,22 @@ static const struct file_operations ima_measure_policy_ops = {
 };
 
 #ifdef CONFIG_IMA_PER_NAMESPACE
-// XXX: needs to be per namespace :)
-static const struct file_operations ima_namespace_policy_ops = {
-	.open = ima_open_policy,
-	.write = ima_write_policy,
-	.read = seq_read,
-	.release = ima_release_policy,
-	.llseek = generic_file_llseek,
-};
-
-static int ima_open_namespaces(struct inode *inode, struct file *flip)
+static int ima_open_namespaces(struct inode *inode, struct file *filp)
 {
+	if (!(filp->f_flags & O_WRONLY)) {
+#ifndef	CONFIG_IMA_READ_POLICY
+		return -EACCES;
+#else
+		if ((filp->f_flags & O_ACCMODE) != O_RDONLY)
+			return -EACCES;
+		if (!capable(CAP_SYS_ADMIN))
+			return -EPERM;
+		return seq_open(filp, &ima_policy_seqops);
+#endif
+	}
 	if (test_and_set_bit(IMA_FS_BUSY, &ima_fs_flags))
 		return -EBUSY;
+
 	return 0;
 }
 
@@ -490,7 +505,7 @@ static ssize_t ima_write_namespaces(struct file *file, const char __user *buf,
 {
 	pid_t pid;
 	struct task_struct *task;
-	struct ima_ns_policy *new;
+	struct ima_ns_entry *new;
 	ssize_t ret;
 	char kbuf[50];
 
@@ -517,11 +532,13 @@ static ssize_t ima_write_namespaces(struct file *file, const char __user *buf,
 	if (!task)
 		return -ESRCH;
 
-	new = kzalloc(sizeof(struct ima_ns_policy), GFP_KERNEL);
+	new = kzalloc(sizeof(struct ima_ns_entry), GFP_KERNEL);
 	if (!new)
 		return -ENOMEM;
 	new->mnt_ns = task->nsproxy->mnt_ns;
 	INIT_LIST_HEAD(&new->list);
+	INIT_LIST_HEAD(&new->policy_rules);
+	new->rules = &ima_default_rules;
 
 	// XXX: explicitly don't get_mnt_ns() here, so that when the refcount
 	// gets to 0 we call our free-ing routines.
@@ -532,11 +549,20 @@ static ssize_t ima_write_namespaces(struct file *file, const char __user *buf,
 		return -EINVAL;
 
 	ret = 0;
-	new->dentry = securityfs_create_file(kbuf, S_IWUSR, ima_namespaces_dir,
-					     NULL, &ima_namespace_policy_ops);
-	if (IS_ERR(new->dentry))
-		ret = PTR_ERR(new->dentry);
+	new->dir = securityfs_create_dir(kbuf, ima_namespaces_dir);
+	if (IS_ERR(new->dir)) {
+		ret = PTR_ERR(new->dir);
+		goto out;
+	}
 
+	new->policy = securityfs_create_file("policy", S_IWUSR, new->dir,
+					     new, &ima_measure_policy_ops);
+	if (IS_ERR(new->policy)) {
+		securityfs_remove(new->dir);
+		ret = PTR_ERR(new->policy);
+	}
+
+out:
 	if (ret) {
 		kfree(new);
 	} else {
@@ -563,13 +589,14 @@ static const struct file_operations ima_namespaces_ops = {
 
 void mnt_namespace_dying(struct mnt_namespace *ns)
 {
-	struct ima_ns_policy *pos;
+	struct ima_ns_entry *pos;
 	list_for_each_entry(pos, &ns_policies, list) {
 		if (pos->mnt_ns != ns)
 			continue;
 
 		list_del(&pos->list);
-		securityfs_remove(pos->dentry);
+		securityfs_remove(pos->policy);
+		securityfs_remove(pos->dir);
 		kfree(pos);
 		return;
 	}

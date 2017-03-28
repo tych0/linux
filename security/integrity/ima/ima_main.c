@@ -425,7 +425,7 @@ static int __init init_ima(void)
 	error = ima_init();
 	if (!error) {
 		ima_initialized = 1;
-		ima_update_policy_flag();
+		// XXX: ima_update_policy_flag();
 	}
 	return error;
 }

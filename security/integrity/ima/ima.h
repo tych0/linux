@@ -116,6 +116,28 @@ struct ima_kexec_hdr {
 	u64 count;
 };
 
+#ifdef CONFIG_IMA_PER_NAMESPACE
+// XXX: should this live on the mount ns directly?
+struct ima_ns_entry {
+	refcount_t refcount;
+	struct list_head list;
+	struct mnt_namespace *mnt_ns;
+	struct dentry *dir;
+	struct dentry *policy;
+	struct list_head *rules;
+	struct list_head policy_rules;
+};
+
+struct ima_ns_file {
+	struct list_head temp_rules;
+	struct ima_ns_entry *ns;
+	int valid_policy;
+	int temp_ima_appraise;
+};
+#else
+struct ima_ns_entry {}
+#endif
+
 #ifdef CONFIG_HAVE_IMA_KEXEC
 void ima_load_kexec_buffer(void);
 #else
@@ -210,11 +232,11 @@ const char *ima_d_path(const struct path *path, char **pathbuf, char *filename);
 int ima_match_policy(struct inode *inode, enum ima_hooks func, int mask,
 		     int flags, int *pcr);
 void ima_init_policy(void);
-void ima_update_policy(void);
-void ima_update_policy_flag(void);
-ssize_t ima_parse_add_rule(char *);
-void ima_delete_rules(void);
-int ima_check_policy(void);
+void ima_update_policy(struct ima_ns_entry *ent, struct list_head *ima_temp_rules, int temp_ima_appraise);
+void ima_update_policy_flag(struct list_head *ima_rules, int temp_ima_appraise);
+ssize_t ima_parse_add_rule(char *, struct list_head *rules, int *temp_ima_appraise);
+void ima_delete_rules(struct list_head *ima_temp_rules);
+int ima_check_policy(struct list_head *ima_temp_rules);
 void *ima_policy_start(struct seq_file *m, loff_t *pos);
 void *ima_policy_next(struct seq_file *m, void *v, loff_t *pos);
 void ima_policy_stop(struct seq_file *m, void *v);
