@@ -2759,6 +2759,22 @@ config PMC_ATOM
 
 source "net/Kconfig"
 
+config EBPF_JIT_VERIFY_OUTPUT
+	def_bool y
+	depends on HAVE_EBPF_JIT
+	depends on BPF_JIT
+	select CRYPTO_SHA256
+	---help---
+	  Enables a double check of the JIT's output after it is marked read-only to
+	  ensure that it matches what the JIT generated.
+
+	  This protects against potential races where an attacker with an arbitrary
+	  write primitive can write into the JIT buffer before it is marked
+	  read-only. Since this buffer is eventually marked executable as well, it is
+	  a potentially high-value target.
+
+	  Note, only applies when /proc/sys/net/core/bpf_jit_harden > 0.
+
 source "drivers/Kconfig"
 
 source "drivers/firmware/Kconfig"
