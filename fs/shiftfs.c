@@ -545,19 +545,21 @@ static int shiftfs_setattr(struct dentry *dentry, struct iattr *attr)
 	return 0;
 }
 
-static int shiftfs_getattr(struct vfsmount *mnt, struct dentry *dentry,
-			   struct kstat *stat)
+static int shiftfs_getattr(const struct path *path, struct kstat *stat,
+			   u32 request_mask, unsigned int flags)
 {
-	struct inode *inode = dentry->d_inode;
+	struct inode *inode = d_inode(path->dentry);
 	struct dentry *real = inode->i_private;
 	struct inode *reali = real->d_inode;
 	const struct inode_operations *iop = reali->i_op;
+	struct path realpath;
 	int err = 0;
 
-	mnt = dentry->d_sb->s_fs_info;
+	realpath.mnt = path->dentry->d_sb->s_fs_info;
+	realpath.dentry = real;
 
 	if (iop->getattr)
-		err = iop->getattr(mnt, real, stat);
+		err = iop->getattr(&realpath, stat, request_mask, flags);
 	else
 		generic_fillattr(reali, stat);
 
