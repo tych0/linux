@@ -560,6 +560,19 @@ out:
 	return result;
 }
 
+void ima_mnt_namespace_dying(unsigned int ns_id)
+{
+	struct ima_ns_policy *p;
+
+	spin_lock(&ima_ns_policy_lock);
+	p = radix_tree_delete(&ima_ns_policy_mapping, ns_id);
+	spin_unlock(&ima_ns_policy_lock);
+	if (!p)
+		return;
+
+	free_namespace_policy(p);
+}
+
 static ssize_t handle_new_namespace_policy(const char *data, size_t datalen)
 {
 	unsigned int ns_id;
