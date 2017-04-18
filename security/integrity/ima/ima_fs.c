@@ -325,7 +325,10 @@ static int allocate_namespace_policy(struct ima_ns_policy **ins, struct dentry *
 
 	p->policy_dentry = policy_dentry;
 	p->ns_dentry = ns_dentry;
-	p->ima_appraise = ima_appraise;
+	if (ima_appraise_mode == IMA_APPRAISE_ENFORCE_NS)
+		p->ima_appraise = IMA_APPRAISE_FIX;   /* For now, on the enforce_ns mode, a new namespace starts in fix mode */
+	else
+		p->ima_appraise = ima_appraise_mode;
 	p->ima_policy_flag = 0;
 	INIT_LIST_HEAD(&p->ima_policy_rules);
 	p->ima_rules = &empty_policy; /* namespace starts with empty rules and not pointing to ima_policy_rules */

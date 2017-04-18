@@ -30,9 +30,9 @@
 int ima_initialized;
 
 #ifdef CONFIG_IMA_APPRAISE
-int ima_appraise = IMA_APPRAISE_ENFORCE; /* Used during IMA initialization only */
+int ima_appraise_mode = IMA_APPRAISE_ENFORCE; /* Used during IMA initialization only */
 #else
-int ima_appraise;
+int ima_appraise_mode;
 #endif
 
 int ima_hash_algo = HASH_ALGO_SHA1;
