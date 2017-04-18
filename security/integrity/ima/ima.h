@@ -140,6 +140,21 @@ static inline void ima_load_kexec_buffer(void) {}
  */
 extern bool ima_canonical_fmt;
 
+/* Namespace policy globals */
+struct ima_ns_policy {
+       struct dentry *policy_dentry;
+       struct dentry *ns_dentry;
+       struct list_head *ima_rules;
+       struct list_head ima_policy_rules;
+       int ima_policy_flag;
+       int ima_appraise;
+};
+
+#ifdef CONFIG_IMA_PER_NAMESPACE
+extern spinlock_t ima_ns_policy_lock;
+extern struct radix_tree_root ima_ns_policy_mapping;
+#endif
+
 /* Internal IMA function definitions */
 int ima_init(void);
 int ima_fs_init(void);
@@ -226,6 +241,7 @@ void ima_update_policy(void);
 void ima_update_policy_flag(void);
 ssize_t ima_parse_add_rule(char *);
 void ima_delete_rules(void);
+void ima_free_policy_rules(struct list_head *policy_rules);
 int ima_check_policy(void);
 void *ima_policy_start(struct seq_file *m, loff_t *pos);
 void *ima_policy_next(struct seq_file *m, void *v, loff_t *pos);

@@ -135,6 +135,10 @@ int __init ima_init(void)
 	if (rc != 0)
 		return rc;
 
+#ifdef CONFIG_IMA_PER_NAMESPACE
+	spin_lock_init(&ima_ns_policy_lock);
+#endif
+
 	ima_init_policy();
 
 	return ima_fs_init();

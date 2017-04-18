@@ -276,6 +276,43 @@ static const struct file_operations ima_ascii_measurements_ops = {
 };
 
 #ifdef CONFIG_IMA_PER_NAMESPACE
+static LIST_HEAD(empty_policy); /* used as namespace policy rules initialization */
+static int allocate_namespace_policy(struct ima_ns_policy **ins, struct dentry *policy_dentry, struct dentry *ns_dentry)
+{
+	int result;
+	struct ima_ns_policy *p;
+
+	p = kmalloc(sizeof(struct ima_ns_policy), GFP_KERNEL);
+	if (!p) {
+		result = -ENOMEM;
+		goto out;
+	}
+
+	p->policy_dentry = policy_dentry;
+	p->ns_dentry = ns_dentry;
+	p->ima_appraise = 0;
+	p->ima_policy_flag = 0;
+	INIT_LIST_HEAD(&p->ima_policy_rules);
+	p->ima_rules = &empty_policy; /* namespace starts with empty rules and not pointing to ima_policy_rules */
+
+	result = 0;
+	*ins = p;
+
+out:
+	return result;
+}
+
+static void free_namespace_policy(struct ima_ns_policy *ins)
+{
+	if (ins->policy_dentry)
+		securityfs_remove(ins->policy_dentry);
+	securityfs_remove(ins->ns_dentry);
+
+	ima_free_policy_rules(&ins->ima_policy_rules);
+
+	kfree(ins);
+}
+
 static int check_ns_exists(unsigned int ns_id)
 {
 	struct task_struct *p;
@@ -489,6 +526,7 @@ static int create_mnt_ns_directory(unsigned int ns_id)
 	int result;
 	struct dentry *ns_dir, *ns_policy;
 	char dir_name[64];
+	struct ima_ns_policy *ins;
 
 	snprintf(dir_name, 64, "%u", ns_id);
 
@@ -503,6 +541,19 @@ static int create_mnt_ns_directory(unsigned int ns_id)
                                            &ima_measure_policy_ops);
 	if (IS_ERR(ns_policy)) {
 		securityfs_remove(ns_dir);
+		goto out;
+	}
+
+	result = allocate_namespace_policy(&ins, ns_policy, ns_dir);
+	if (!result) {
+		spin_lock(&ima_ns_policy_lock);
+		result = radix_tree_insert(&ima_ns_policy_mapping, ns_id, ins);
+		spin_unlock(&ima_ns_policy_lock);
+		if (result)
+			free_namespace_policy(ins);
+	} else {
+		securityfs_remove(ns_policy);
+		securityfs_remove(ns_dir);
 	}
 
 out:
@@ -513,11 +564,22 @@ static ssize_t handle_new_namespace_policy(const char *data, size_t datalen)
 {
 	unsigned int ns_id;
 	ssize_t result;
+	struct ima_ns_policy *ins;
 
 	result = -EINVAL;
 
 	if (sscanf(data, "%u", &ns_id) != 1) {
 		pr_err("IMA: invalid namespace id: %s\n", data);
+		goto out;
+	}
+
+	rcu_read_lock();
+	ins = radix_tree_lookup(&ima_ns_policy_mapping, ns_id);
+	rcu_read_unlock();
+
+	if (ins) {
+		pr_info("IMA: directory for namespace id %u already created\n", ns_id);
+		result = datalen;
 		goto out;
 	}
 
