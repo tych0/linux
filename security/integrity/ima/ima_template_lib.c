@@ -14,6 +14,8 @@
  */
 
 #include "ima_template_lib.h"
+#include <linux/proc_ns.h>
+#include <linux/types.h>
 
 static bool ima_template_hash_algo_allowed(u8 algo)
 {
@@ -329,4 +331,73 @@ int ima_eventsig_init(struct ima_event_data *event_data,
 					   field_data);
 out:
 	return rc;
+}
+
+#define TMPBUFLEN 64
+int ima_namespaceid_init(struct ima_event_data *event_data,
+			 struct ima_field_data *field_data)
+{
+	u8 tmpbuf[TMPBUFLEN];
+	struct ns_common *ns;
+
+	ns = mntns_operations.get(current);
+	snprintf(tmpbuf, TMPBUFLEN, "mnt-ns=%u", ns->inum);
+	mntns_operations.put(ns);
+
+	return ima_write_template_field_data(tmpbuf, strlen(tmpbuf), DATA_FMT_STRING, field_data);
+}
+
+void ima_show_namespaceid(struct seq_file *m, enum ima_show_type show,
+                          struct ima_field_data *field_data)
+{
+	ima_show_template_field_data(m, show, DATA_FMT_STRING, field_data);
+}
+
+int ima_filei_init(struct ima_event_data *event_data,
+			 struct ima_field_data *field_data)
+{
+	u8 tmpbuf[TMPBUFLEN];
+	struct inode *inode;
+	int rc = 0;
+
+	if (event_data->file) {
+		inode = file_inode(event_data->file);
+		snprintf(tmpbuf, TMPBUFLEN, "inode=%lu", inode->i_ino);
+		rc = ima_write_template_field_data(tmpbuf, strlen(tmpbuf), DATA_FMT_STRING, field_data);
+	} else {
+		pr_info("IMA: event file is NULL\n");
+	}
+
+	return rc;
+}
+
+void ima_show_filei(struct seq_file *m, enum ima_show_type show,
+                          struct ima_field_data *field_data)
+{
+	ima_show_template_field_data(m, show, DATA_FMT_STRING, field_data);
+}
+
+int ima_dev_init(struct ima_event_data *event_data,
+			 struct ima_field_data *field_data)
+{
+	u8 tmpbuf[TMPBUFLEN];
+	struct inode *inode;
+	int rc = 0;
+
+	if (event_data->file) {
+		inode = file_inode(event_data->file);
+		snprintf(tmpbuf, sizeof(inode->i_sb->s_id), "dev=%s", inode->i_sb->s_id); //TODO: check untrusted string? see audit_log_n_untrustedstring()
+		tmpbuf[TMPBUFLEN-1] = 0;
+		rc = ima_write_template_field_data(tmpbuf, strlen(tmpbuf), DATA_FMT_STRING, field_data);
+	} else {
+		pr_info("IMA: event file is NULL\n");
+	}
+
+	return rc;
+}
+
+void ima_show_dev(struct seq_file *m, enum ima_show_type show,
+                          struct ima_field_data *field_data)
+{
+	ima_show_template_field_data(m, show, DATA_FMT_STRING, field_data);
 }
