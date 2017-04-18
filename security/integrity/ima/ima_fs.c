@@ -325,7 +325,7 @@ static int allocate_namespace_policy(struct ima_ns_policy **ins, struct dentry *
 
 	p->policy_dentry = policy_dentry;
 	p->ns_dentry = ns_dentry;
-	p->ima_appraise = 0;
+	p->ima_appraise = ima_appraise;
 	p->ima_policy_flag = 0;
 	INIT_LIST_HEAD(&p->ima_policy_rules);
 	p->ima_rules = &empty_policy; /* namespace starts with empty rules and not pointing to ima_policy_rules */
@@ -412,6 +412,8 @@ static ssize_t ima_write_policy(struct file *file, const char __user *buf,
 {
 	char *data;
 	ssize_t result;
+	unsigned int ns_id;
+	struct ima_ns_policy *ins;
 
 	if (datalen >= PAGE_SIZE)
 		datalen = PAGE_SIZE - 1;
@@ -436,14 +438,17 @@ static ssize_t ima_write_policy(struct file *file, const char __user *buf,
 	if (result < 0)
 		goto out_free;
 
+	ns_id = ima_find_namespace_id_from_inode(file->f_inode);
+	ins = ima_get_policy_from_namespace(ns_id);
+
 	if (data[0] == '/') {
 		result = ima_read_policy(data);
-	} else if (ima_appraise & IMA_APPRAISE_POLICY) {
+	} else if (ins->ima_appraise & IMA_APPRAISE_POLICY) {
 		pr_err("IMA: signed policy file (specified as an absolute pathname) required\n");
 		integrity_audit_msg(AUDIT_INTEGRITY_STATUS, NULL, NULL,
 				    "policy_update", "signed policy required",
 				    1, 0);
-		if (ima_appraise & IMA_APPRAISE_ENFORCE)
+		if (ins->ima_appraise & IMA_APPRAISE_ENFORCE)
 			result = -EACCES;
 	} else {
 		result = ima_parse_add_rule(data);
@@ -541,7 +546,7 @@ static int ima_release_policy(struct inode *inode, struct file *file)
 	ns_id = ima_find_namespace_id_from_inode(inode);
 	ins = ima_get_policy_from_namespace(ns_id);
 
-	ima_update_policy();
+	ima_update_policy(ins);
 #ifndef	CONFIG_IMA_WRITE_POLICY
 	if (ins == &ima_initial_namespace_policy) {
 		securityfs_remove(ima_policy);
