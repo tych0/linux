@@ -275,6 +275,41 @@ static const struct file_operations ima_ascii_measurements_ops = {
 	.release = seq_release,
 };
 
+/*
+ * ima_find_namespace_id_from_inode
+ * @policy_inode: the inode of the securityfs policy file for a given namespace
+ *
+ * Return 0 if the namespace id is not found in ima_ns_policy_mapping
+ */
+unsigned int ima_find_namespace_id_from_inode(struct inode *policy_inode)
+{
+	unsigned int ns_id = 0;
+#ifdef CONFIG_IMA_PER_NAMESPACE
+	struct ima_ns_policy *ins;
+	void **slot;
+	struct radix_tree_iter iter;
+
+	rcu_read_lock();
+	radix_tree_for_each_slot(slot, &ima_ns_policy_mapping, &iter, 0) {
+		ins = radix_tree_deref_slot(slot);
+		if (unlikely(!ins))
+			continue;
+		if (radix_tree_deref_retry(ins)) {
+			slot = radix_tree_iter_retry(&iter);
+			continue;
+		}
+
+		if (ins->policy_dentry && ins->policy_dentry->d_inode == policy_inode) {
+			ns_id = iter.index;
+			break;
+		}
+	}
+	rcu_read_unlock();
+#endif
+
+	return ns_id;
+}
+
 #ifdef CONFIG_IMA_PER_NAMESPACE
 static LIST_HEAD(empty_policy); /* used as namespace policy rules initialization */
 static int allocate_namespace_policy(struct ima_ns_policy **ins, struct dentry *policy_dentry, struct dentry *ns_dentry)
@@ -479,6 +514,8 @@ static int ima_open_policy(struct inode *inode, struct file *filp)
 static int ima_release_policy(struct inode *inode, struct file *file)
 {
 	const char *cause = valid_policy ? "completed" : "failed";
+	unsigned int ns_id;
+	struct ima_ns_policy *ins;
 
 	if ((file->f_flags & O_ACCMODE) == O_RDONLY)
 		return seq_release(inode, file);
@@ -499,10 +536,20 @@ static int ima_release_policy(struct inode *inode, struct file *file)
 		return 0;
 	}
 
+	/* get the namespace id from file->inode (policy file inode)
+	 * ns_id==0 means the initial namespace which is the ima/policy file */
+	ns_id = ima_find_namespace_id_from_inode(inode);
+	ins = ima_get_policy_from_namespace(ns_id);
+
 	ima_update_policy();
 #ifndef	CONFIG_IMA_WRITE_POLICY
-	securityfs_remove(ima_policy);
-	ima_policy = NULL;
+	if (ins == &ima_initial_namespace_policy) {
+		securityfs_remove(ima_policy);
+		ima_policy = NULL;
+	} else {
+		securityfs_remove(ins->policy_dentry);
+		ins->policy_dentry = NULL;
+	}
 #else
 	clear_bit(IMA_FS_BUSY, &ima_fs_flags);
 #endif
