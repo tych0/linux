@@ -61,9 +61,6 @@ enum tpm_pcrs { TPM_PCR0 = 0, TPM_PCR8 = 8 };
 #endif
 
 
-/* current content of the policy */
-extern int ima_policy_flag;
-
 /* set during initialization */
 extern int ima_initialized;
 extern int ima_used_chip;
@@ -149,12 +146,12 @@ struct ima_ns_policy {
        int ima_policy_flag;
        int ima_appraise;
 };
-
 extern struct ima_ns_policy ima_initial_namespace_policy;
 #ifdef CONFIG_IMA_PER_NAMESPACE
 extern spinlock_t ima_ns_policy_lock;
 extern struct radix_tree_root ima_ns_policy_mapping;
 #endif
+
 
 /* Internal IMA function definitions */
 int ima_init(void);
@@ -220,7 +217,7 @@ enum ima_hooks {
 
 /* LIM API function definitions */
 int ima_get_action(struct inode *inode, int mask,
-		   enum ima_hooks func, int *pcr);
+		   enum ima_hooks func, int *pcr, struct ima_ns_policy *ins);
 int ima_must_measure(struct inode *inode, int mask, enum ima_hooks func);
 int ima_collect_measurement(struct integrity_iint_cache *iint,
 			    struct file *file, void *buf, loff_t size,
@@ -241,10 +238,10 @@ const char *ima_d_path(const struct path *path, char **pathbuf, char *filename);
 
 /* IMA policy related functions */
 int ima_match_policy(struct inode *inode, enum ima_hooks func, int mask,
-		     int flags, int *pcr);
+		     int flags, int *pcr, struct ima_ns_policy *ins);
 void ima_init_policy(void);
-void ima_update_policy(void);
-void ima_update_policy_flag(void);
+void ima_update_policy(struct ima_ns_policy *ins);
+void ima_update_policy_flag(struct ima_ns_policy *ins);
 ssize_t ima_parse_add_rule(char *);
 void ima_delete_rules(void);
 void ima_free_policy_rules(struct list_head *policy_rules);
@@ -262,12 +259,13 @@ int ima_policy_show(struct seq_file *m, void *v);
 #define IMA_APPRAISE_FIRMWARE	0x10
 #define IMA_APPRAISE_POLICY	0x20
 
+
 #ifdef CONFIG_IMA_APPRAISE
 int ima_appraise_measurement(enum ima_hooks func,
 			     struct integrity_iint_cache *iint,
 			     struct file *file, const unsigned char *filename,
 			     struct evm_ima_xattr_data *xattr_value,
-			     int xattr_len, int opened);
+			     int xattr_len, int opened, struct ima_ns_policy *ins);
 int ima_must_appraise(struct inode *inode, int mask, enum ima_hooks func);
 void ima_update_xattr(struct integrity_iint_cache *iint, struct file *file);
 enum integrity_status ima_get_cache_status(struct integrity_iint_cache *iint,
@@ -283,7 +281,7 @@ static inline int ima_appraise_measurement(enum ima_hooks func,
 					   struct file *file,
 					   const unsigned char *filename,
 					   struct evm_ima_xattr_data *xattr_value,
-					   int xattr_len, int opened)
+					   int xattr_len, int opened, struct ima_ns_policy *ins)
 {
 	return INTEGRITY_UNKNOWN;
 }
