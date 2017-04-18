@@ -326,4 +326,6 @@ static inline int security_filter_rule_match(u32 secid, u32 field, u32 op,
 #define	POLICY_FILE_FLAGS	S_IWUSR
 #endif /* CONFIG_IMA_WRITE_POLICY */
 
+#define NAMESPACES_FILE_FLAGS  S_IWUSR
+
 #endif /* __LINUX_IMA_H */
