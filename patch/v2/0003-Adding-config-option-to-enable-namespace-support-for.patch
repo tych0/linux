@@ -1,0 +1,32 @@
+
+Subject: [PATCH 03/12] ima: add IMA per namespace kernel config option
+
+Adding a kernel config option to enable namespace support for IMA policy.
+
+Signed-off-by: Guilherme Magalhaes <guilherme.magalhaes@hpe.com>
+Signed-off-by: Joaquim Souza <joaquims@hpe.com>
+Signed-off-by: Tycho Andersen <tycho@docker.com>
+---
+ security/integrity/ima/Kconfig | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/security/integrity/ima/Kconfig b/security/integrity/ima/Kconfig
+index 370eb2f..9bdfcb5 100644
+--- a/security/integrity/ima/Kconfig
++++ b/security/integrity/ima/Kconfig
+@@ -219,3 +219,12 @@ config IMA_APPRAISE_SIGNED_INIT
+ 	default n
+ 	help
+ 	   This option requires user-space init to be signed.
++
++config IMA_PER_NAMESPACE
++	bool "Enable per mount-namespace handling of IMA signatures."
++	depends on IMA
++	default n
++	select IMA_WRITE_POLICY
++	help
++	    This option enables another API in securityfs allowing IMA policies to
++	    apply per mount namespace.
+-- 
+2.7.4
+

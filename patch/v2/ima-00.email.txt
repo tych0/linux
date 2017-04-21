@@ -1,0 +1,51 @@
+
+
+[PATCH 00/12] namespace support for IMA policy
+
+Patches 1, 2 and 4 qualify the file pathname considering multiple namespaces.
+Patch 3 adds a new kernel config which enables all the policy per namespace 
+functionality.
+Patch 5 adds the namespace securityfs file which is the interface to define
+IMA policy per namespace. New policy file is creanted for each namespace and
+the policy securityfs mechanism is completely reused.
+Patche 7 adds a hook to fs/namespace.c to automatically delete all namespace
+IMA policy resources such as radix tree entry and securityfs files.
+Patches 8 and 10 are small implementation details
+Patches 6, 9, 11 are key changes to encapsulate all policy rules and flags in
+a structure per namespace. The correct structure is retrieved for the target
+namespace and the namespace rules are used on that context.
+Patch 12 adds the enforce_ns appraise mode which enables different appraise 
+modes per namespace.
+
+Other areas might still need work to completely namespace IMA.
+
+
+Guilherme Magalhaes, Joaquim Souza, Tycho Andersen (12)
+ ima: qualify pathname in audit info record
+ ima: qualify pathname in audit measurement record
+ ima: add IMA per namespace kernel config option
+ ima: qualify pathname in measurement file
+ ima: add support to namespace securityfs file
+ ima: store new namespace policy structure in a radix tree
+ ima: release namespace policy resources at namespace release
+ ima: ima_delete_rules is now based on ima_free_policy_rules
+ ima: global namespace policy structure to track initial namespace policy data
+ ima: delete namespaced policy securityfs file in write-once mode
+ ima: handling all policy flags per namespace using ima_ns_policy structure
+ ima: appraise mode per namespace with new enforce_ns appraise mode
+
+ fs/namespace.c                            |   4 ++
+ include/linux/integrity.h                 |   9 +++++
+ security/integrity/ima/Kconfig            |   9 +++++
+ security/integrity/ima/ima.h              |  65 ++++++++++++++++++++++++-------
+ security/integrity/ima/ima_api.c          |  14 +++++--
+ security/integrity/ima/ima_appraise.c     |  30 ++++++++++-----
+ security/integrity/ima/ima_fs.c           | 322 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++---
+ security/integrity/ima/ima_init.c         |  15 ++++++--
+ security/integrity/ima/ima_main.c         |  42 ++++++++++++--------
+ security/integrity/ima/ima_policy.c       | 193 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-------------------
+ security/integrity/ima/ima_template.c     |  10 ++++-
+ security/integrity/ima/ima_template_lib.c |  71 ++++++++++++++++++++++++++++++++++
+ security/integrity/ima/ima_template_lib.h |  13 +++++++
+ security/integrity/integrity_audit.c      |   5 +++
+ 14 files changed, 712 insertions(+), 90 deletions(-)
