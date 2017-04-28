@@ -230,6 +230,7 @@ struct ima_ns_policy *ima_get_policy_from_namespace(unsigned int ns_id)
  * get_namespace_policy_from_inode - Finds namespace mapping from securityfs policy file
  * @inode: inode of the securityfs policy file under a namespace folder
  */
+/* needs an #ifdef IMA_POLICY_READ I think */
 static struct ima_ns_policy *get_namespace_policy_from_inode(struct inode *inode)
 {
 	unsigned int ns_id;
@@ -245,21 +246,15 @@ static struct ima_ns_policy *get_namespace_policy_from_inode(struct inode *inode
 /*
  * ima_get_current_namespace_policy - Finds the namespace policy mapping for the current task
  */
-struct ima_ns_policy *ima_get_current_namespace_policy(void)
+struct ima_ns_policy *ima_get_current_namespace_policy(struct ns_common *ns)
 {
 	struct ima_ns_policy *ins = NULL;
 #ifdef CONFIG_IMA_PER_NAMESPACE
-	struct ns_common *ns;
-
-	ns = mntns_operations.get(current);
-	if (ns) {
+	if (ns)
 		ins = ima_get_policy_from_namespace(ns->inum);
-		mntns_operations.put(ns);
-	}
-	if (!ins) {
+	else
 		/* if current namespace has no IMA policy, get the initial namespace policy */
 		ins = &ima_initial_namespace_policy;
-	}
 #else
 	ins = &ima_initial_namespace_policy;
 #endif

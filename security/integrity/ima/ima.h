@@ -181,7 +181,7 @@ int ima_init_template(void);
 void ima_init_template_list(void);
 
 /* IMA namespace function definitions */
-struct ima_ns_policy *ima_get_current_namespace_policy(void);
+struct ima_ns_policy *ima_get_current_namespace_policy(struct ns_common *mntns);
 unsigned int ima_find_namespace_id_from_inode(struct inode *policy_inode);
 struct ima_ns_policy *ima_get_policy_from_namespace(unsigned int ns_id);
 

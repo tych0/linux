@@ -176,11 +176,14 @@ static int process_measurement(struct file *file, char *buf, loff_t size,
 	bool violation_check;
 	enum hash_algo hash_algo;
 	struct ima_ns_policy *ins;
+	struct ns_common *mntns;
 
-	ins = ima_get_current_namespace_policy();
 
+	mntns = mntns_operations.get(current);
+
+	ins = ima_get_current_namespace_policy(mntns);
 	if (!ins->ima_policy_flag || !S_ISREG(inode->i_mode))
-		return 0;
+		goto out_putns;
 
 	/* Return an IMA_MEASURE, IMA_APPRAISE, IMA_AUDIT action
 	 * bitmask based on the appraise/audit/measurement policy.
@@ -190,7 +193,7 @@ static int process_measurement(struct file *file, char *buf, loff_t size,
 	violation_check = ((func == FILE_CHECK || func == MMAP_CHECK) &&
 			   (ins->ima_policy_flag & IMA_MEASURE));
 	if (!action && !violation_check)
-		return 0;
+		goto out_putns;
 
 	must_appraise = action & IMA_APPRAISE;
 
@@ -273,6 +276,8 @@ out:
 	inode_unlock(inode);
 	if ((rc && must_appraise) && (ins->ima_appraise & IMA_APPRAISE_ENFORCE))
 		return -EACCES;
+out_putns:
+	mntns_operations.put(mntns);
 	return 0;
 }
 
