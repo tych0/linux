@@ -752,6 +752,31 @@ static inline int page_has_private(struct page *page)
 	return !!(page->flags & PAGE_FLAGS_PRIVATE);
 }
 
+#ifdef CONFIG_XPFO
+/*
+ * Header soup means that we declare this as extern; there may be a better
+ * place for page_is_unmapped to live that can fix this.
+ */
+extern bool xpfo_page_is_unmapped(struct page *page);
+
+/**
+ * page_is_unmapped - Determine if a page is unmapped.
+ * @page: The page to be checked
+ *
+ * Determine if the page is unmapped (e.g. because of XPFO or the high mem
+ * case), indicating it needs to be mapped before use.
+ */
+static inline bool page_is_unmapped(struct page *page)
+{
+	return PageHighMem(page) || xpfo_page_is_unmapped(page);
+}
+#else
+static inline bool page_is_unmapped(struct page *page)
+{
+	return PageHighMem(page);
+}
+#endif
+
 #undef PF_ANY
 #undef PF_HEAD
 #undef PF_ONLY_HEAD
