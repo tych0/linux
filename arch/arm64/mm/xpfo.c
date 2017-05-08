@@ -11,8 +11,10 @@
  * the Free Software Foundation.
  */
 
+#include <linux/highmem.h>
 #include <linux/mm.h>
 #include <linux/module.h>
+#include <linux/xpfo.h>
 
 #include <asm/tlbflush.h>
 
@@ -55,4 +57,20 @@ inline void xpfo_flush_kernel_tlb(struct page *page, int order)
 	unsigned long size = PAGE_SIZE;
 
 	flush_tlb_kernel_range(kaddr, kaddr + (1 << order) * size);
+}
+
+void xpfo_dma_map_unmap_area(bool map, const void *addr, size_t size,
+				    enum dma_data_direction dir)
+{
+	unsigned long num_pages = XPFO_NUM_PAGES(addr, size);
+	void *mapping[num_pages];
+
+	xpfo_temp_map(addr, size, mapping, sizeof(mapping[0]) * num_pages);
+
+	if (map)
+		__dma_map_area(addr, size, dir);
+	else
+		__dma_unmap_area(addr, size, dir);
+
+	xpfo_temp_unmap(addr, size, mapping, sizeof(mapping[0]) * num_pages);
 }
