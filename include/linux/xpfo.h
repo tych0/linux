@@ -18,6 +18,8 @@
 
 #ifdef CONFIG_XPFO
 
+#include <linux/dma-mapping.h>
+
 extern struct page_ext_operations page_xpfo_ops;
 
 void set_kpte(void *kaddr, struct page *page, pgprot_t prot);
