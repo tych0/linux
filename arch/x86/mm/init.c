@@ -167,7 +167,7 @@ static void __init probe_page_size_mask(void)
 	 * This will simplify cpa(), which otherwise needs to support splitting
 	 * large pages into small in interrupt context, etc.
 	 */
-	if (boot_cpu_has(X86_FEATURE_PSE) && !debug_pagealloc_enabled() && !IS_ENABLED(CONFIG_KMEMCHECK))
+	if (boot_cpu_has(X86_FEATURE_PSE) && !debug_pagealloc_enabled() && !IS_ENABLED(CONFIG_KMEMCHECK) && !IS_ENABLED(CONFIG_XPFO))
 		page_size_mask |= 1 << PG_LEVEL_2M;
 	else
 		direct_gbpages = 0;
