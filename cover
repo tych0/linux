@@ -1,0 +1,49 @@
+Hi all,
+
+Here is a v4 of the XPFO series from Juerg [1].
+
+Changes from:
+	v3 -> v4:
+		- Fixed some memory corruption.
+    - Add __init to need_xpfo since it uses xpfo_disabled
+    - s/int/bool in a few places
+  v2 -> v3:
+    - Removed 'depends on DEBUG_KERNEL' and 'select DEBUG_TLBFLUSH'.
+      These are left-overs from the original patch and are not required.
+    - Make libata XPFO-aware, i.e., properly handle pages that were
+      unmapped by XPFO. This takes care of the temporary hack in v2 that
+      forced the use of a bounce buffer in block/blk-map.c.
+  v1 -> v2:
+    - Moved the code from arch/x86/mm/ to mm/ since it's (mostly)
+      arch-agnostic.
+    - Moved the config to the generic layer and added ARCH_SUPPORTS_XPFO
+      for x86.
+    - Use page_ext for the additional per-page data.
+    - Removed the clearing of pages. This can be accomplished by using
+      PAGE_POISONING.
+    - Split up the patch into multiple patches.
+    - Fixed additional issues identified by reviewers.
+
+This patch series adds support for XPFO which protects against 'ret2dir'
+kernel attacks. The basic idea is to enforce exclusive ownership of page
+frames by either the kernel or userspace, unless explicitly requested by
+the kernel. Whenever a page destined for userspace is allocated, it is
+unmapped from physmap (the kernel's page table). When such a page is
+reclaimed from userspace, it is mapped back to physmap.
+
+Additional fields in the page_ext struct are used for XPFO housekeeping.
+Specifically two flags to distinguish user vs. kernel pages and to tag
+unmapped pages and a reference counter to balance kmap/kunmap operations
+and a lock to serialize access to the XPFO fields.
+
+Known issues/limitations:
+  - Only supports x86-64 (for now)
+  - Only supports 4k pages (for now)
+  - There are most likely some legitimate uses cases where the kernel needs
+    to access userspace which need to be made XPFO-aware
+  - Performance penalty
+
+Reference paper by the original patch authors:
+  http://www.cs.columbia.edu/~vpk/papers/ret2dir.sec14.pdf
+
+[1]: https://lkml.org/lkml/2016/11/4/245
