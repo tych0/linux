@@ -19,5 +19,38 @@ inline void set_kpte(void *kaddr, struct page *page, pgprot_t prot)
 	unsigned int level;
 	pte_t *pte = lookup_address((unsigned long)kaddr, &level);
 
-	set_pte_atomic(pte, pfn_pte(page_to_pfn(page), canon_pgprot(prot)));
+	BUG_ON(!pte);
+
+	switch (level) {
+	case PG_LEVEL_4K:
+		set_pte_atomic(pte, pfn_pte(page_to_pfn(page), canon_pgprot(prot)));
+		break;
+	case PG_LEVEL_2M:
+	case PG_LEVEL_1G: {
+		struct cpa_data cpa;
+		int do_split;
+
+		memset(&cpa, 0, sizeof(cpa));
+		cpa.vaddr = &kaddr; /* XXX: & here? */
+		cpa.pages = &page
+		cpa.mask_set = prot;
+		cpa.mask_clr = prot;
+		cpa.numpages = 1;
+		cpa.flags = 0;
+		cpa.curpage = 0;
+		cpa.force_split = 0;
+
+		do_split = try_preserve_large_page(pte, kaddr, &cpa);
+		if (do_split < 0)
+			BUG_ON(split_large_page(&cpa, pte, kaddr));
+
+		break;
+	}
+	case PG_LEVEL_512G:
+		/* fallthrough, splitting infrastructure doesn't
+		 * support 512G pages. */
+	default:
+		BUG();
+	}
+
 }

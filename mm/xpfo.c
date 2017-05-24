@@ -108,9 +108,25 @@ void xpfo_alloc_pages(struct page *page, int order, gfp_t gfp)
 	}
 
 	if (flush_tlb) {
+		int level;
+		unsigned long size;
+
 		kaddr = (unsigned long)page_address(page);
-		flush_tlb_kernel_range(kaddr, kaddr + (1 << order) *
-				       PAGE_SIZE);
+		lookup_address(kaddr, &level);
+
+		switch (level) {
+		case PG_LEVEL_4K:
+			size = PAGE_SIZE;
+			break;
+		case PG_LEVEL_2M:
+			size = PMD_SIZE;
+			break;
+		case PG_LEVEL_1G:
+			size = PUD_SIZE;
+			break;
+		}
+
+		flush_tlb_kernel_range(kaddr, kaddr + (1 << order) * size);
 	}
 }
 
