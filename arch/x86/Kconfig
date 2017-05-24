@@ -1401,7 +1401,7 @@ config ARCH_DMA_ADDR_T_64BIT
 
 config X86_DIRECT_GBPAGES
 	def_bool y
-	depends on X86_64 && !DEBUG_PAGEALLOC && !KMEMCHECK && !XPFO
+	depends on X86_64 && !DEBUG_PAGEALLOC && !KMEMCHECK
 	---help---
 	  Certain kernel features effectively disable kernel
 	  linear 1 GB mappings (even if the CPU otherwise

@@ -76,7 +76,6 @@ void xpfo_alloc_pages(struct page *page, int order, gfp_t gfp)
 {
 	int i, flush_tlb = 0;
 	struct xpfo *xpfo;
-	unsigned long kaddr;
 
 	if (!static_branch_unlikely(&xpfo_inited))
 		return;
@@ -107,11 +106,8 @@ void xpfo_alloc_pages(struct page *page, int order, gfp_t gfp)
 		}
 	}
 
-	if (flush_tlb) {
-		kaddr = (unsigned long)page_address(page);
-		flush_tlb_kernel_range(kaddr, kaddr + (1 << order) *
-				       PAGE_SIZE);
-	}
+	if (flush_tlb)
+		xpfo_flush_kernel_page(page, order);
 }
 
 void xpfo_free_pages(struct page *page, int order)
