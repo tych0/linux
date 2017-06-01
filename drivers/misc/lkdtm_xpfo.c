@@ -23,12 +23,17 @@ static phys_addr_t user_virt_to_phys(unsigned long addr)
 	pud_t *pud;
 	pmd_t *pmd;
 	pte_t *pte;
+	p4d_t *p4d;
 
 	pgd = pgd_offset(current->mm, addr);
 	if (pgd_none(*pgd))
                 return 0;
 
-	pud = pud_offset(pgd, addr);
+	p4d = p4d_offset(pgd, addr);
+	if (p4d_none(*p4d))
+		return 0;
+
+	pud = pud_offset(p4d, addr);
         if (pud_none(*pud))
                 return 0;
 
