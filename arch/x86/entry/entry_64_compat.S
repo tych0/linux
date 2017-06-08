@@ -18,6 +18,12 @@
 
 	.section .entry.text, "ax"
 
+	.macro erase_kstack
+#ifdef CONFIG_STACKLEAK
+	call erase_kstack
+#endif
+	.endm
+
 /*
  * 32-bit SYSENTER entry.
  *
@@ -229,6 +235,7 @@ ENTRY(entry_SYSCALL_compat)
 
 	/* Opportunistic SYSRET */
 sysret32_from_system_call:
+	erase_kstack
 	TRACE_IRQS_ON			/* User mode traces as IRQs on. */
 	movq	RBX(%rsp), %rbx		/* pt_regs->rbx */
 	movq	RBP(%rsp), %rbp		/* pt_regs->rbp */
@@ -337,6 +344,7 @@ ENTRY(entry_INT80_compat)
 .Lsyscall_32_done:
 
 	/* Go back to user mode. */
+	erase_kstack
 	TRACE_IRQS_ON
 	SWAPGS
 	jmp	restore_regs_and_iret

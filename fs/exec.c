@@ -1928,3 +1928,20 @@ COMPAT_SYSCALL_DEFINE5(execveat, int, fd,
 				  argv, envp, flags);
 }
 #endif
+
+#ifdef CONFIG_STACKLEAK
+void __used track_stack(void)
+{
+	unsigned long sp = (unsigned long)&sp;
+
+	if (sp < current->thread.lowest_stack &&
+	    sp >= (unsigned long)task_stack_page(current) +
+					2 * sizeof(unsigned long)) {
+		current->thread.lowest_stack = sp;
+	}
+
+	if (unlikely((sp & ~(THREAD_SIZE - 1)) < (THREAD_SIZE / 16)))
+		BUG();
+}
+EXPORT_SYMBOL(track_stack);
+#endif

@@ -162,3 +162,15 @@ void show_regs(struct pt_regs *regs)
 	}
 	pr_cont("\n");
 }
+
+#ifdef CONFIG_STACKLEAK
+void __used check_alloca(unsigned long size)
+{
+	unsigned long sp = (unsigned long)&sp, stack_left;
+
+	/* all kernel stacks are of the same size */
+	stack_left = sp & (THREAD_SIZE - 1);
+	BUG_ON(stack_left < 256 || size >= stack_left - 256);
+}
+EXPORT_SYMBOL(check_alloca);
+#endif

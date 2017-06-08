@@ -178,3 +178,36 @@ void show_regs(struct pt_regs *regs)
 	}
 	pr_cont("\n");
 }
+
+#ifdef CONFIG_STACKLEAK
+void __used check_alloca(unsigned long size)
+{
+	struct stack_info stack_info = {0};
+	unsigned long visit_mask = 0;
+	unsigned long sp = (unsigned long)&sp;
+	unsigned long stack_left;
+
+	BUG_ON(get_stack_info(&sp, current, &stack_info, &visit_mask));
+
+	switch (stack_info.type) {
+	case STACK_TYPE_TASK:
+		stack_left = sp & (THREAD_SIZE - 1);
+		break;
+
+	case STACK_TYPE_IRQ:
+		stack_left = sp & (IRQ_STACK_SIZE - 1);
+		break;
+
+	case STACK_TYPE_EXCEPTION ... STACK_TYPE_EXCEPTION_LAST:
+		stack_left = sp & (EXCEPTION_STKSZ - 1);
+		break;
+
+	case STACK_TYPE_SOFTIRQ:
+	default:
+		BUG();
+	}
+
+	BUG_ON(stack_left < 256 || size >= stack_left - 256);
+}
+EXPORT_SYMBOL(check_alloca);
+#endif

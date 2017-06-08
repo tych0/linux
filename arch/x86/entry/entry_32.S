@@ -75,6 +75,73 @@
 #endif
 .endm
 
+.macro erase_kstack
+#ifdef CONFIG_STACKLEAK
+	call erase_kstack
+#endif
+.endm
+
+#ifdef CONFIG_STACKLEAK
+/*
+ * ebp: thread_info
+ */
+ENTRY(erase_kstack)
+	pushl	%edi
+	pushl	%ecx
+	pushl	%eax
+	pushl	%ebp
+
+	movl	PER_CPU_VAR(current_task), %ebp
+	mov	TASK_lowest_stack(%ebp), %edi
+	mov	$-0xBEEF, %eax
+	std
+
+1:
+	mov	%edi, %ecx
+	and	$THREAD_SIZE_asm - 1, %ecx
+	shr	$2, %ecx
+	repne	scasl
+	jecxz	2f
+
+	cmp	$2*16, %ecx
+	jc	2f
+
+	mov	$2*16, %ecx
+	repe	scasl
+	jecxz	2f
+	jne	1b
+
+2:
+	cld
+	or	$2*4, %edi
+	mov	%esp, %ecx
+	sub	%edi, %ecx
+
+	cmp	$THREAD_SIZE_asm, %ecx
+	jb	3f
+	ud2
+
+3:
+	shr	$2, %ecx
+	rep	stosl
+
+	/*
+	 * TODO: sp0 on x86_32 is not reliable, right?
+	 * Doubt because of the definition of cpu_current_top_of_stack
+	 * in arch/x86/kernel/cpu/common.c.
+	 */
+	mov	TASK_thread_sp0(%ebp), %edi
+	sub	$128, %edi
+	mov	%edi, TASK_lowest_stack(%ebp)
+
+	popl	%ebp
+	popl	%eax
+	popl	%ecx
+	popl	%edi
+	ret
+ENDPROC(erase_kstack)
+#endif
+
 /*
  * User gs save/restore
  *
@@ -445,6 +512,8 @@ ENTRY(entry_SYSENTER_32)
 	ALTERNATIVE "testl %eax, %eax; jz .Lsyscall_32_done", \
 		    "jmp .Lsyscall_32_done", X86_FEATURE_XENPV
 
+	erase_kstack
+
 /* Opportunistic SYSEXIT */
 	TRACE_IRQS_ON			/* User mode traces as IRQs on. */
 	movl	PT_EIP(%esp), %edx	/* pt_regs->ip */
@@ -530,6 +599,8 @@ ENTRY(entry_INT80_32)
 	movl	%esp, %eax
 	call	do_int80_syscall_32
 .Lsyscall_32_done:
+
+	erase_kstack
 
 restore_all:
 	TRACE_IRQS_IRET

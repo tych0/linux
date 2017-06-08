@@ -57,6 +57,94 @@ ENDPROC(native_usergs_sysret64)
 #endif
 .endm
 
+.macro erase_kstack
+#ifdef CONFIG_STACKLEAK
+	call erase_kstack
+#endif
+.endm
+
+#ifdef CONFIG_STACKLEAK
+ENTRY(erase_kstack)
+	pushq	%rdi
+	pushq	%rcx
+	pushq	%rax
+	pushq	%r11
+
+	movq	PER_CPU_VAR(current_task), %r11
+	mov	TASK_lowest_stack(%r11), %rdi
+	mov	$-0xBEEF, %rax		/* -0xBEEF is a stack poison. */
+	std
+
+1:
+	/*
+	 * Let's search for the poison value in the stack.
+	 * Start from the lowest_stack and go to the bottom (see std above).
+	 */
+	mov	%edi, %ecx
+	and	$THREAD_SIZE_asm - 1, %ecx
+	shr	$3, %ecx
+	repne	scasq
+	jecxz	2f	/* Didn't find it. Go to poisoning. */
+
+	/*
+	 * Found the poison value in the stack. Go to poisoning if there are
+	 * less than 16 qwords left.
+	 */
+	cmp	$2*8, %ecx
+	jc	2f
+
+	/*
+	 * Check that 16 further qwords contain poison (avoid false positives).
+	 * If so, the part of the stack below the address in %rdi is likely
+	 * to be poisoned. Otherwise we need to search deeper.
+	 */
+	mov	$2*8, %ecx
+	repe	scasq
+	jecxz	2f	/* Poison the upper part of the stack. */
+	jne	1b	/* Search deeper. */
+
+2:
+	/*
+	 * Prepare the counter for poisoning the kernel stack between
+	 * %rdi and %rsp.
+	 *
+	 * TODO: Sorry, don't understand why the following OR instruction is
+	 * needed. That may be connected to the thread.lowest_stack
+	 * initialization in arch/x86/kernel/process_64.c, where it is set
+	 * to the task_stack_page address + 2 * sizeof(unsigned long).
+	 */
+	cld
+	or	$2*8, %rdi
+	mov	%esp, %ecx
+	sub	%edi, %ecx
+
+	/* Check that the counter value is sane. */
+	cmp	$THREAD_SIZE_asm, %rcx
+	jb	3f
+	ud2
+
+3:
+	/*
+	 * So let's write the poison value to the kernel stack. Start from the
+	 * address in %rdi and move up (see cld above) to the address in %rsp
+	 * (not included, used memory).
+	 */
+	shr	$3, %ecx
+	rep	stosq
+
+	/* Set the lowest_stack value to the top_of_stack - 256. */
+	mov	TASK_thread_sp0(%r11), %rdi
+	sub	$256, %rdi
+	mov	%rdi, TASK_lowest_stack(%r11)
+
+	popq	%r11
+	popq	%rax
+	popq	%rcx
+	popq	%rdi
+	ret
+ENDPROC(erase_kstack)
+#endif
+
 /*
  * When dynamic function tracer is enabled it will add a breakpoint
  * to all locations that it is about to modify, sync CPUs, update
@@ -217,6 +305,8 @@ entry_SYSCALL_64_fastpath:
 	testl	$_TIF_ALLWORK_MASK, TASK_TI_flags(%r11)
 	jnz	1f
 
+	erase_kstack
+
 	LOCKDEP_SYS_EXIT
 	TRACE_IRQS_ON		/* user mode is traced as IRQs on */
 	movq	RIP(%rsp), %rcx
@@ -245,6 +335,8 @@ entry_SYSCALL64_slow_path:
 	call	do_syscall_64		/* returns with IRQs disabled */
 
 return_from_SYSCALL_64:
+	erase_kstack
+
 	RESTORE_EXTRA_REGS
 	TRACE_IRQS_IRETQ		/* we're about to change IF */
 
@@ -414,6 +506,7 @@ ENTRY(ret_from_fork)
 2:
 	movq	%rsp, %rdi
 	call	syscall_return_slowpath	/* returns with IRQs disabled */
+	erase_kstack
 	TRACE_IRQS_ON			/* user mode is traced as IRQS on */
 	SWAPGS
 	jmp	restore_regs_and_iret
@@ -526,6 +619,12 @@ ret_from_intr:
 GLOBAL(retint_user)
 	mov	%rsp,%rdi
 	call	prepare_exit_to_usermode
+
+	/*
+	 * TODO: Do we need to call erase_kstack here?
+	 * The PaX patch has it here commented out.
+	 */
+
 	TRACE_IRQS_IRETQ
 	SWAPGS
 	jmp	restore_regs_and_iret
