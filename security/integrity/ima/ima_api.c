@@ -192,6 +192,7 @@ int ima_get_action(struct inode *inode, int mask, enum ima_hooks func, int *pcr)
  * Return 0 on success, error code otherwise
  */
 int ima_collect_measurement(struct integrity_iint_cache *iint,
+			    struct integrity_iint_ns *ns,
 			    struct file *file, void *buf, loff_t size,
 			    enum hash_algo algo)
 {
@@ -204,7 +205,7 @@ int ima_collect_measurement(struct integrity_iint_cache *iint,
 		char digest[IMA_MAX_DIGEST_SIZE];
 	} hash;
 
-	if (!(iint->flags & IMA_COLLECTED)) {
+	if (!(ns->flags & IMA_COLLECTED)) {
 		u64 i_version = file_inode(file)->i_version;
 
 		if (file->f_flags & O_DIRECT) {
@@ -225,7 +226,9 @@ int ima_collect_measurement(struct integrity_iint_cache *iint,
 				iint->ima_hash = tmpbuf;
 				memcpy(iint->ima_hash, &hash, length);
 				iint->version = i_version;
-				iint->flags |= IMA_COLLECTED;
+				// XXX: update all flags (or really, keep the
+				// collected flag on the inode itself)
+				ns->flags |= IMA_COLLECTED;
 			} else
 				result = -ENOMEM;
 		}
@@ -254,6 +257,7 @@ out:
  * Must be called with iint->mutex held.
  */
 void ima_store_measurement(struct integrity_iint_cache *iint,
+			   struct integrity_iint_ns *ns,
 			   struct file *file, const unsigned char *filename,
 			   struct evm_ima_xattr_data *xattr_value,
 			   int xattr_len, int pcr)
@@ -267,7 +271,7 @@ void ima_store_measurement(struct integrity_iint_cache *iint,
 					    xattr_len, NULL};
 	int violation = 0;
 
-	if (iint->measured_pcrs & (0x1 << pcr))
+	if (ns->measured_pcrs & (0x1 << pcr))
 		return;
 
 	result = ima_alloc_init_template(&event_data, &entry);
@@ -279,14 +283,15 @@ void ima_store_measurement(struct integrity_iint_cache *iint,
 
 	result = ima_store_template(entry, violation, inode, filename, pcr);
 	if (!result || result == -EEXIST) {
-		iint->flags |= IMA_MEASURED;
-		iint->measured_pcrs |= (0x1 << pcr);
+		ns->flags |= IMA_MEASURED;
+		ns->measured_pcrs |= (0x1 << pcr);
 	}
 	if (result < 0)
 		ima_free_template_entry(entry);
 }
 
 void ima_audit_measurement(struct integrity_iint_cache *iint,
+			   struct integrity_iint_ns *ns,
 			   const unsigned char *filename)
 {
 	struct audit_buffer *ab;
@@ -295,7 +300,7 @@ void ima_audit_measurement(struct integrity_iint_cache *iint,
 	char algo_hash[sizeof(hash) + strlen(algo_name) + 2];
 	int i;
 
-	if (iint->flags & IMA_AUDITED)
+	if (ns->flags & IMA_AUDITED)
 		return;
 
 	for (i = 0; i < iint->ima_hash->length; i++)
@@ -316,7 +321,7 @@ void ima_audit_measurement(struct integrity_iint_cache *iint,
 	audit_log_task_info(ab, current);
 	audit_log_end(ab);
 
-	iint->flags |= IMA_AUDITED;
+	ns->flags |= IMA_AUDITED;
 }
 
 /*

@@ -21,6 +21,7 @@
 #include <linux/rbtree.h>
 #include <linux/file.h>
 #include <linux/uaccess.h>
+#include <linux/cred.h>
 #include "integrity.h"
 
 static struct rb_root integrity_iint_tree = RB_ROOT;
@@ -68,18 +69,47 @@ struct integrity_iint_cache *integrity_iint_find(struct inode *inode)
 	return iint;
 }
 
+static void iint_ns_free(struct integrity_iint_ns *ns)
+{
+	BUG_ON(!mutex_is_locked(&ns->free));
+	mutex_unlock(&ns->free);
+	mutex_destroy(&ns->free);
+	kfree(ns);
+}
+
 static void iint_free(struct integrity_iint_cache *iint)
 {
+	struct integrity_iint_ns *pos, *n;
+	LIST_HEAD(to_free);
+
 	kfree(iint->ima_hash);
+
+	rcu_read_lock();
+	list_for_each_entry_safe(pos, n, &iint->ns, iint_list) {
+		/* someone else will free this, we don't need to do anything */
+		if (!mutex_trylock(&pos->free))
+			continue;
+
+		list_del(&pos->iint_list);
+		list_del(&pos->ns_list);
+
+		list_add(&pos->iint_list, &to_free);
+	}
+	rcu_read_unlock();
+	synchronize_rcu();
+
+	list_for_each_entry_safe(pos, n, &to_free, iint_list)
+		iint_ns_free(pos);
+
+	INIT_LIST_HEAD(&iint->ns);
+
 	iint->ima_hash = NULL;
 	iint->version = 0;
-	iint->flags = 0UL;
 	iint->ima_file_status = INTEGRITY_UNKNOWN;
 	iint->ima_mmap_status = INTEGRITY_UNKNOWN;
 	iint->ima_bprm_status = INTEGRITY_UNKNOWN;
 	iint->ima_read_status = INTEGRITY_UNKNOWN;
 	iint->evm_status = INTEGRITY_UNKNOWN;
-	iint->measured_pcrs = 0;
 	kmem_cache_free(iint_cache, iint);
 }
 
@@ -95,6 +125,7 @@ struct integrity_iint_cache *integrity_inode_get(struct inode *inode)
 	struct rb_node **p;
 	struct rb_node *node, *parent = NULL;
 	struct integrity_iint_cache *iint, *test_iint;
+	struct integrity_iint_ns *ns;
 
 	iint = integrity_iint_find(inode);
 	if (iint)
@@ -103,6 +134,19 @@ struct integrity_iint_cache *integrity_inode_get(struct inode *inode)
 	iint = kmem_cache_alloc(iint_cache, GFP_NOFS);
 	if (!iint)
 		return NULL;
+
+	ns = kzalloc(sizeof(*ns), GFP_KERNEL);
+	if (!ns) {
+		kmem_cache_free(iint_cache, iint);
+		return NULL;
+	}
+
+	INIT_LIST_HEAD(&ns->ns_list);
+	INIT_LIST_HEAD(&ns->iint_list);
+	mutex_init(&ns->free);
+	ns->inum = current_user_ns()->ns.inum;
+
+	list_add(&ns->iint_list, &iint->ns);
 
 	write_lock(&integrity_iint_lock);
 
@@ -126,6 +170,35 @@ struct integrity_iint_cache *integrity_inode_get(struct inode *inode)
 	write_unlock(&integrity_iint_lock);
 	return iint;
 }
+
+#if CONFIG_IMA_PER_NAMESPACE
+struct integrity_iint_ns *integrity_iint_ns_get(struct integrity_iint_cache *c)
+{
+	struct integrity_iint_ns *pos = NULL;
+	unsigned int target = current_user_ns()->ns.inum;
+
+	rcu_read_lock();
+	list_for_each_entry(pos, &c->ns, iint_list) {
+		// XXX: we should figure out some way to look for the ns or any
+		// of its parents, i.e. inherit policy
+		if (pos->inum == target) {
+			rcu_read_unlock();
+			return pos;
+		}
+	}
+	rcu_read_unlock();
+
+	mutex_lock(&c->nslock);
+
+out:
+	return pos;
+}
+#else
+struct integrity_iint_ns *integrity_iint_ns_get(struct integrity_iint_cache *c)
+{
+	return list_first_entry(&c->ns, struct integirty_iint_ns, iint_list);
+}
+#endif
 
 /**
  * integrity_inode_free - called on security_inode_free
@@ -154,13 +227,12 @@ static void init_once(void *foo)
 
 	memset(iint, 0, sizeof(*iint));
 	iint->version = 0;
-	iint->flags = 0UL;
 	iint->ima_file_status = INTEGRITY_UNKNOWN;
 	iint->ima_mmap_status = INTEGRITY_UNKNOWN;
 	iint->ima_bprm_status = INTEGRITY_UNKNOWN;
 	iint->ima_read_status = INTEGRITY_UNKNOWN;
 	iint->evm_status = INTEGRITY_UNKNOWN;
-	iint->measured_pcrs = 0;
+	INIT_LIST_HEAD(&iint->ns);
 }
 
 static int __init integrity_iintcache_init(void)

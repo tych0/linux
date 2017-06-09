@@ -97,13 +97,27 @@ struct signature_v2_hdr {
 	uint8_t sig[0];		/* signature payload */
 } __packed;
 
+struct integrity_iint_ns {
+	struct list_head ns_list;
+	struct list_head iint_list;
+
+	unsigned long flags;
+	unsigned long measured_pcrs;
+
+	unsigned int inum;
+
+	struct mutex free;
+};
+
 /* integrity data associated with an inode */
 struct integrity_iint_cache {
 	struct rb_node rb_node;	/* rooted in integrity_iint_tree */
 	struct inode *inode;	/* back pointer to inode in question */
 	u64 version;		/* track inode changes */
-	unsigned long flags;
-	unsigned long measured_pcrs;
+
+	struct list_head ns;
+	struct mutex nslock;
+
 	enum integrity_status ima_file_status:4;
 	enum integrity_status ima_mmap_status:4;
 	enum integrity_status ima_bprm_status:4;

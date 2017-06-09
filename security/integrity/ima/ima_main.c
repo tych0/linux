@@ -78,6 +78,7 @@ __setup("ima_hash=", hash_setup);
  */
 static void ima_rdwr_violation_check(struct file *file,
 				     struct integrity_iint_cache *iint,
+				     struct integrity_iint_ns *ns,
 				     int must_measure,
 				     char **pathbuf,
 				     const char **pathname)
@@ -91,8 +92,10 @@ static void ima_rdwr_violation_check(struct file *file,
 		if (atomic_read(&inode->i_readcount) && IS_IMA(inode)) {
 			if (!iint)
 				iint = integrity_iint_find(inode);
+			if (!ns)
+				ns = integrity_iint_ns_get(iint);
 			/* IMA_MEASURE is set from reader side */
-			if (iint && (iint->flags & IMA_MEASURE))
+			if (ns && (ns->flags & IMA_MEASURE))
 				send_tomtou = true;
 		}
 	} else {
@@ -114,6 +117,7 @@ static void ima_rdwr_violation_check(struct file *file,
 }
 
 static void ima_check_last_writer(struct integrity_iint_cache *iint,
+				  struct integrity_iint_ns *ns,
 				  struct inode *inode, struct file *file)
 {
 	fmode_t mode = file->f_mode;
@@ -124,11 +128,11 @@ static void ima_check_last_writer(struct integrity_iint_cache *iint,
 	inode_lock(inode);
 	if (atomic_read(&inode->i_writecount) == 1) {
 		if ((iint->version != inode->i_version) ||
-		    (iint->flags & IMA_NEW_FILE)) {
-			iint->flags &= ~(IMA_DONE_MASK | IMA_NEW_FILE);
-			iint->measured_pcrs = 0;
-			if (iint->flags & IMA_APPRAISE)
-				ima_update_xattr(iint, file);
+		    (ns->flags & IMA_NEW_FILE)) {
+			ns->flags &= ~(IMA_DONE_MASK | IMA_NEW_FILE);
+			ns->measured_pcrs = 0;
+			if (ns->flags & IMA_APPRAISE)
+				ima_update_xattr(iint, ns, file);
 		}
 	}
 	inode_unlock(inode);
@@ -144,6 +148,7 @@ void ima_file_free(struct file *file)
 {
 	struct inode *inode = file_inode(file);
 	struct integrity_iint_cache *iint;
+	struct integrity_iint_ns *ns;
 
 	if (!ima_policy_flag || !S_ISREG(inode->i_mode))
 		return;
@@ -152,7 +157,11 @@ void ima_file_free(struct file *file)
 	if (!iint)
 		return;
 
-	ima_check_last_writer(iint, inode, file);
+	ns = integrity_iint_ns_get(iint);
+	if (!ns)
+		return;
+
+	ima_check_last_writer(iint, ns, inode, file);
 }
 
 static int process_measurement(struct file *file, char *buf, loff_t size,
@@ -160,6 +169,7 @@ static int process_measurement(struct file *file, char *buf, loff_t size,
 {
 	struct inode *inode = file_inode(file);
 	struct integrity_iint_cache *iint = NULL;
+	struct integrity_iint_ns *ns = NULL;
 	struct ima_template_desc *template_desc;
 	char *pathbuf = NULL;
 	char filename[NAME_MAX];
@@ -196,10 +206,14 @@ static int process_measurement(struct file *file, char *buf, loff_t size,
 		iint = integrity_inode_get(inode);
 		if (!iint)
 			goto out;
+
+		ns = integrity_iint_ns_get(iint);
+		if (!ns)
+			goto out;
 	}
 
 	if (violation_check) {
-		ima_rdwr_violation_check(file, iint, action & IMA_MEASURE,
+		ima_rdwr_violation_check(file, iint, ns, action & IMA_MEASURE,
 					 &pathbuf, &pathname);
 		if (!action) {
 			rc = 0;
@@ -211,12 +225,12 @@ static int process_measurement(struct file *file, char *buf, loff_t size,
 	 * (IMA_MEASURE, IMA_MEASURED, IMA_XXXX_APPRAISE, IMA_XXXX_APPRAISED,
 	 *  IMA_AUDIT, IMA_AUDITED)
 	 */
-	iint->flags |= action;
+	ns->flags |= action;
 	action &= IMA_DO_MASK;
-	action &= ~((iint->flags & (IMA_DONE_MASK ^ IMA_MEASURED)) >> 1);
+	action &= ~((ns->flags & (IMA_DONE_MASK ^ IMA_MEASURED)) >> 1);
 
 	/* If target pcr is already measured, unset IMA_MEASURE action */
-	if ((action & IMA_MEASURE) && (iint->measured_pcrs & (0x1 << pcr)))
+	if ((action & IMA_MEASURE) && (ns->measured_pcrs & (0x1 << pcr)))
 		action ^= IMA_MEASURE;
 
 	/* Nothing to do, just return existing appraised status */
@@ -234,10 +248,10 @@ static int process_measurement(struct file *file, char *buf, loff_t size,
 
 	hash_algo = ima_get_hash_algo(xattr_value, xattr_len);
 
-	rc = ima_collect_measurement(iint, file, buf, size, hash_algo);
+	rc = ima_collect_measurement(iint, ns, file, buf, size, hash_algo);
 	if (rc != 0) {
 		if (file->f_flags & O_DIRECT)
-			rc = (iint->flags & IMA_PERMIT_DIRECTIO) ? 0 : -EACCES;
+			rc = (ns->flags & IMA_PERMIT_DIRECTIO) ? 0 : -EACCES;
 		goto out_digsig;
 	}
 
@@ -245,17 +259,17 @@ static int process_measurement(struct file *file, char *buf, loff_t size,
 		pathname = ima_d_path(&file->f_path, &pathbuf, filename);
 
 	if (action & IMA_MEASURE)
-		ima_store_measurement(iint, file, pathname,
+		ima_store_measurement(iint, ns, file, pathname,
 				      xattr_value, xattr_len, pcr);
 	if (action & IMA_APPRAISE_SUBMASK)
-		rc = ima_appraise_measurement(func, iint, file, pathname,
+		rc = ima_appraise_measurement(func, iint, ns, file, pathname,
 					      xattr_value, xattr_len, opened);
 	if (action & IMA_AUDIT)
-		ima_audit_measurement(iint, pathname);
+		ima_audit_measurement(iint, ns, pathname);
 
 out_digsig:
-	if ((mask & MAY_WRITE) && (iint->flags & IMA_DIGSIG) &&
-	     !(iint->flags & IMA_NEW_FILE))
+	if ((mask & MAY_WRITE) && (ns->flags & IMA_DIGSIG) &&
+	     !(ns->flags & IMA_NEW_FILE))
 		rc = -EACCES;
 	kfree(xattr_value);
 out_free:
@@ -334,6 +348,7 @@ EXPORT_SYMBOL_GPL(ima_file_check);
 void ima_post_path_mknod(struct dentry *dentry)
 {
 	struct integrity_iint_cache *iint;
+	struct integrity_iint_ns *ns;
 	struct inode *inode = dentry->d_inode;
 	int must_appraise;
 
@@ -342,8 +357,14 @@ void ima_post_path_mknod(struct dentry *dentry)
 		return;
 
 	iint = integrity_inode_get(inode);
-	if (iint)
-		iint->flags |= IMA_NEW_FILE;
+	if (!iint)
+		return;
+
+	ns = integrity_iint_ns_get(iint);
+	if (!ns)
+		return;
+
+	ns->flags |= IMA_NEW_FILE;
 }
 
 /**

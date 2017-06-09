@@ -46,6 +46,8 @@ struct ima_ns_policy {
 	struct list_head list;
 	unsigned int inum;	/* the inum for the user ns */
 	struct dentry *dentry;
+
+	struct list_head iint_ns_list;
 };
 
 static LIST_HEAD(ns_policies);
@@ -506,6 +508,7 @@ static ssize_t ima_write_namespaces(struct file *file, const char __user *buf,
 	if (!new)
 		goto out;
 	INIT_LIST_HEAD(&new->list);
+	INIT_LIST_HEAD(&new->iint_ns_list);
 
 	new->inum = task_cred_xxx(task, user_ns)->ns.inum;
 
@@ -545,8 +548,8 @@ static const struct file_operations ima_namespaces_ops = {
 
 void ima_userns_dying(struct user_namespace *ns)
 {
-	struct ima_ns_policy *pos;
-	list_for_each_entry(pos, &ns_policies, list) {
+	struct ima_ns_policy *pos, *n;
+	list_for_each_entry_safe(pos, n, &ns_policies, list) {
 		if (pos->inum != ns->ns.inum)
 			continue;
 

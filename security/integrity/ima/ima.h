@@ -190,13 +190,17 @@ int ima_get_action(struct inode *inode, int mask,
 		   enum ima_hooks func, int *pcr);
 int ima_must_measure(struct inode *inode, int mask, enum ima_hooks func);
 int ima_collect_measurement(struct integrity_iint_cache *iint,
+			    struct integrity_iint_ns *ns,
 			    struct file *file, void *buf, loff_t size,
 			    enum hash_algo algo);
-void ima_store_measurement(struct integrity_iint_cache *iint, struct file *file,
+void ima_store_measurement(struct integrity_iint_cache *iint,
+			   struct integrity_iint_ns *ns,
+			   struct file *file,
 			   const unsigned char *filename,
 			   struct evm_ima_xattr_data *xattr_value,
 			   int xattr_len, int pcr);
 void ima_audit_measurement(struct integrity_iint_cache *iint,
+			   struct integrity_iint_ns *ns,
 			   const unsigned char *filename);
 int ima_alloc_init_template(struct ima_event_data *event_data,
 			    struct ima_template_entry **entry);
@@ -231,11 +235,13 @@ int ima_policy_show(struct seq_file *m, void *v);
 #ifdef CONFIG_IMA_APPRAISE
 int ima_appraise_measurement(enum ima_hooks func,
 			     struct integrity_iint_cache *iint,
+			     struct integrity_iint_ns *ns,
 			     struct file *file, const unsigned char *filename,
 			     struct evm_ima_xattr_data *xattr_value,
 			     int xattr_len, int opened);
 int ima_must_appraise(struct inode *inode, int mask, enum ima_hooks func);
-void ima_update_xattr(struct integrity_iint_cache *iint, struct file *file);
+void ima_update_xattr(struct integrity_iint_cache *iint,
+		      struct integrity_iint_ns *ns, struct file *file);
 enum integrity_status ima_get_cache_status(struct integrity_iint_cache *iint,
 					   enum ima_hooks func);
 enum hash_algo ima_get_hash_algo(struct evm_ima_xattr_data *xattr_value,

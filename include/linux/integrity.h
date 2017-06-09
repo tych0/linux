@@ -53,4 +53,7 @@ static inline void ima_userns_dying(struct user_namespace *ns)
 }
 #endif /* CONFIG_IMA_PER_NAMESPACE */
 
+extern struct integrity_iint_ns *
+			integrity_iint_ns_get(struct integrity_iint_cache *i);
+
 #endif /* _LINUX_INTEGRITY_H */

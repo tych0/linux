@@ -42,7 +42,7 @@
 #define AUDIT		0x0040
 
 #define INVALID_PCR(a) (((a) < 0) || \
-	(a) >= (FIELD_SIZEOF(struct integrity_iint_cache, measured_pcrs) * 8))
+	(a) >= (FIELD_SIZEOF(struct integrity_iint_ns, measured_pcrs) * 8))
 
 int ima_policy_flag;
 static int temp_ima_appraise;
