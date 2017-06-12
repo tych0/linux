@@ -44,7 +44,7 @@ inline void set_kpte(void *kaddr, struct page *page, pgprot_t prot)
 		cpa.force_split = 0;
 
 		do_split = try_preserve_large_page(pte, (unsigned long)kaddr, &cpa);
-		if (do_split < 0)
+		if (do_split)
 			BUG_ON(split_large_page(&cpa, pte, (unsigned long)kaddr));
 
 		break;
