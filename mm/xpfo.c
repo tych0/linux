@@ -27,25 +27,25 @@ enum xpfo_flags {
 /* Per-page XPFO house-keeping data */
 struct xpfo {
 	unsigned long flags;	/* Page state */
-	int inited;		/* Map counter and lock initialized */
+	bool inited;		/* Map counter and lock initialized */
 	atomic_t mapcount;	/* Counter for balancing map/unmap requests */
 	spinlock_t maplock;	/* Lock to serialize map/unmap requests */
 };
 
 DEFINE_STATIC_KEY_FALSE(xpfo_inited);
 
-static int xpfo_disabled __initdata;
+static bool xpfo_disabled __initdata;
 
 static int __init noxpfo_param(char *str)
 {
-	xpfo_disabled = 1;
+	xpfo_disabled = true;
 
 	return 0;
 }
 
 early_param("noxpfo", noxpfo_param);
 
-static bool need_xpfo(void)
+static bool __init need_xpfo(void)
 {
 	if (xpfo_disabled) {
 		printk(KERN_INFO "XPFO disabled\n");
@@ -89,7 +89,7 @@ void xpfo_alloc_pages(struct page *page, int order, gfp_t gfp)
 		if (unlikely(!xpfo->inited)) {
 			spin_lock_init(&xpfo->maplock);
 			atomic_set(&xpfo->mapcount, 0);
-			xpfo->inited = 1;
+			xpfo->inited = true;
 		}
 		BUG_ON(atomic_read(&xpfo->mapcount));
 
