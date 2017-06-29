@@ -66,5 +66,6 @@ void lkdtm_USERCOPY_KERNEL(void);
 
 /* lkdtm_xpfo.c */
 void lkdtm_XPFO_READ_USER(void);
+void lkdtm_XPFO_READ_USER_HUGE(void);
 
 #endif

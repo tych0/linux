@@ -71,8 +71,7 @@ out:
 	return (phys_addr_t)(phys_addr | offset);
 }
 
-/* Read from userspace via the kernel's linear map. */
-void lkdtm_XPFO_READ_USER(void)
+void read_user_with_flags(unsigned long flags)
 {
 	unsigned long user_addr, user_data = 0xdeadbeef;
 	phys_addr_t phys_addr;
@@ -80,7 +79,7 @@ void lkdtm_XPFO_READ_USER(void)
 
 	user_addr = vm_mmap(NULL, 0, PAGE_SIZE,
 			    PROT_READ | PROT_WRITE | PROT_EXEC,
-			    MAP_ANONYMOUS | MAP_PRIVATE, 0);
+			    flags, 0);
 	if (user_addr >= TASK_SIZE) {
 		pr_warn("Failed to allocate user memory\n");
 		return;
@@ -112,4 +111,15 @@ void lkdtm_XPFO_READ_USER(void)
 
  free_user:
 	vm_munmap(user_addr, PAGE_SIZE);
+}
+
+/* Read from userspace via the kernel's linear map. */
+void lkdtm_XPFO_READ_USER(void)
+{
+	read_user_with_flags(MAP_PRIVATE | MAP_ANONYMOUS);
+}
+
+void lkdtm_XPFO_READ_USER_HUGE(void)
+{
+	read_user_with_flags(MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB);
 }
