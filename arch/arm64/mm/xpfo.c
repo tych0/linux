@@ -16,6 +16,8 @@
 #include <linux/module.h>
 #include <linux/xpfo.h>
 
+#include <asm/tlbflush.h>
+
 /*
  * Lookup the page table entry for a virtual address and return a pointer to
  * the entry. Based on x86 tree.
@@ -89,6 +91,14 @@ inline void xpfo_dma_map_unmap_area(bool map, const void *addr, size_t size,
 		kunmap_atomic(buf2);
 
 	local_irq_restore(flags);
+}
+
+inline void xpfo_flush_kernel_page(struct page *page, int order)
+{
+	unsigned long kaddr = (unsigned long)page_address(page);
+	unsigned long size = PAGE_SIZE;
+
+	flush_tlb_kernel_range(kaddr, kaddr + (1 << order) * size);
 }
 
 /* Convert a user space virtual address to a physical address.
