@@ -349,6 +349,9 @@ unsigned long vm_mmap(struct file *file, unsigned long addr,
 		return -EINVAL;
 
 	if (flag & MAP_HUGETLB) {
+		if (file)
+			return -EINVAL;
+
 		file = map_hugetlb_setup(&len, flag);
 		if (IS_ERR(file))
 			return PTR_ERR(file);
