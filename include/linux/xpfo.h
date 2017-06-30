@@ -19,6 +19,7 @@
 #ifdef CONFIG_XPFO
 
 #include <linux/dma-mapping.h>
+#include <linux/types.h>
 
 extern struct page_ext_operations page_xpfo_ops;
 
@@ -45,6 +46,8 @@ void xpfo_temp_unmap(const void *addr, size_t size, void **mapping,
 
 bool xpfo_enabled(void);
 
+phys_addr_t user_virt_to_phys(unsigned long addr);
+
 #else /* !CONFIG_XPFO */
 
 static inline void xpfo_kmap(void *kaddr, struct page *page) { }
@@ -68,6 +71,8 @@ static inline void xpfo_temp_unmap(const void *addr, size_t size,
 
 
 static inline bool xpfo_enabled(void) { return false; }
+
+static inline phys_addr_t user_virt_to_phys(unsigned long addr) { return 0; }
 
 #endif /* CONFIG_XPFO */
 
