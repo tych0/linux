@@ -577,4 +577,8 @@ static __always_inline void __write_once_size(volatile void *p, void *res, int s
 	(_________p1); \
 })
 
+#ifdef CONFIG_GCC_PLUGIN_STACKLEAK
+# define STACKLEAK_POISON -0xBEEF
+#endif
+
 #endif /* __LINUX_COMPILER_H */
