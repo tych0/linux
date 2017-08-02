@@ -61,34 +61,41 @@ inline void xpfo_dma_map_unmap_area(bool map, const void *addr, size_t size,
 				    int dir)
 {
 	unsigned long flags;
-	void *buf1 = NULL, *buf2 = NULL;
 	struct page *page = virt_to_page(addr);
 
-	/* Sanity check */
-	BUG_ON(size > PAGE_SIZE);
+	/*
+	 * +2 here because we really want
+	 * ceil(size / PAGE_SIZE), not floor(), and one extra in case things are
+	 * not page aligned
+	 */
+	int i, possible_pages = size / PAGE_SIZE + 2;
+	void *buf[possible_pages];
+
+	memset(buf, 0, sizeof(void *) * possible_pages);
 
 	local_irq_save(flags);
 
 	/* Map the first page */
 	if (xpfo_page_is_unmapped(page))
-		buf1 = kmap_atomic(page);
+		buf[0] = kmap_atomic(page);
 
-	/* Map the second page if the range crosses a page boundary */
-	if (((((unsigned long)addr + size - 1) & PAGE_MASK) !=
-	     ((unsigned long)addr & PAGE_MASK)) &&
-	    xpfo_page_is_unmapped(page + 1))
-		buf2 = kmap_atomic(page + 1);
+	/* Map the remaining pages */
+	for (i = 1; i < possible_pages; i++) {
+		if (page_to_virt(page + i) >= addr + size)
+			break;
+
+		if (xpfo_page_is_unmapped(page + i))
+			buf[i] = kmap_atomic(page + i);
+	}
 
 	if (map)
 		__dma_map_area(addr, size, dir);
 	else
 		__dma_unmap_area(addr, size, dir);
 
-	if (buf1 != NULL)
-		kunmap_atomic(buf1);
-
-	if (buf2 != NULL)
-		kunmap_atomic(buf2);
+	for (i = 0; i < possible_pages; i++)
+		if (buf[i])
+			kunmap_atomic(buf[i]);
 
 	local_irq_restore(flags);
 }
