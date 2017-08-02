@@ -202,3 +202,17 @@ ENTRY(__dma_unmap_area)
 	b.ne	__dma_inv_area
 	ret
 ENDPIPROC(__dma_unmap_area)
+
+/*
+ *	__dma_line_size(start, size, dir)
+ *	- addr - kernel virtual start address
+ *  returns the initial offset for the entire cache line (stolen from the
+ *  beginning of dcache_by_line_op)
+ */
+ENTRY(__dma_line_size)
+	dcache_line_size x2, x3
+	sub x3, x2, #1
+	bic x0, x0, x3
+    udf
+	ret
+ENDPROC(__dma_line_size)

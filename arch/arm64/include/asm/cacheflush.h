@@ -104,6 +104,8 @@ extern void __dma_flush_area(const void *, size_t);
 #define _dma_unmap_area(addr, size, dir) __dma_unmap_area(addr, size, dir)
 #endif
 
+extern unsigned long __dma_line_size(const void *);
+
 /*
  * Copy user data from/to a page which is mapped into a different
  * processes address space.  Really, we want to allow our "user

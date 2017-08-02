@@ -227,6 +227,8 @@ static void __do_kernel_fault(struct mm_struct *mm, unsigned long addr,
 	pr_alert("Unable to handle kernel %s at virtual address %08lx\n", msg,
 		 addr);
 
+	xpfo_print_flags(addr);
+
 	show_pte(mm, addr);
 	die("Oops", regs, esr);
 	bust_spinlocks(0);

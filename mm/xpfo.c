@@ -18,6 +18,8 @@
 
 #include <asm/tlbflush.h>
 
+#include <linux/stacktrace.h>
+
 /* XPFO page state flags */
 enum xpfo_flags {
 	XPFO_PAGE_USER,		/* Page is allocated to user-space */
@@ -30,6 +32,9 @@ struct xpfo {
 	bool inited;		/* Map counter and lock initialized */
 	atomic_t mapcount;	/* Counter for balancing map/unmap requests */
 	spinlock_t maplock;	/* Lock to serialize map/unmap requests */
+
+	unsigned long entries[16];
+	struct stack_trace trace;
 };
 
 DEFINE_STATIC_KEY_FALSE(xpfo_inited);
@@ -90,6 +95,8 @@ void xpfo_alloc_pages(struct page *page, int order, gfp_t gfp)
 			spin_lock_init(&xpfo->maplock);
 			atomic_set(&xpfo->mapcount, 0);
 			xpfo->inited = true;
+			xpfo->trace.entries = xpfo->entries;
+			xpfo->trace.max_entries = 16;
 		}
 		BUG_ON(atomic_read(&xpfo->mapcount));
 
@@ -201,6 +208,10 @@ void xpfo_kunmap(void *kaddr, struct page *page)
 		set_bit(XPFO_PAGE_UNMAPPED, &xpfo->flags);
 		set_kpte(kaddr, page, __pgprot(0));
 		__flush_tlb_one((unsigned long)kaddr);
+
+		xpfo->trace.nr_entries = 0;
+		xpfo->trace.skip = 0;
+		save_stack_trace(&xpfo->trace);
 	}
 
 	spin_unlock_irqrestore(&xpfo->maplock, flags);
@@ -215,3 +226,35 @@ inline bool xpfo_page_is_unmapped(struct page *page)
 	return test_bit(XPFO_PAGE_UNMAPPED, &lookup_xpfo(page)->flags);
 }
 EXPORT_SYMBOL(xpfo_page_is_unmapped);
+
+void xpfo_print_flags(unsigned long addr)
+{
+	struct page *page;
+	struct xpfo *xpfo;
+
+	pr_alert("xpfo info for: %lx\n", addr);
+
+	if (!static_branch_unlikely(&xpfo_inited)) {
+		pr_alert("Not inited (static)\n");
+		return;
+	}
+
+	page = virt_to_page(addr);
+	xpfo = lookup_xpfo(page);
+
+	if (!xpfo->inited) {
+		pr_alert("Not inited\n");
+		return;
+	}
+
+	pr_alert("page: %p, mapcount: %d\n", page, atomic_read(&xpfo->mapcount));
+
+	if (test_bit(XPFO_PAGE_USER, &xpfo->flags))
+		pr_alert("XPFO_PAGE_USER\n");
+
+	if (test_bit(XPFO_PAGE_UNMAPPED, &xpfo->flags)) {
+		pr_alert("XPFO_PAGE_UNMAPPED\n");
+		print_stack_trace(&xpfo->trace, 4);
+		pr_alert("done with stack trace\n");
+	}
+}

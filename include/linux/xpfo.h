@@ -33,6 +33,8 @@ bool xpfo_page_is_unmapped(struct page *page);
 
 extern phys_addr_t user_virt_to_phys(unsigned long addr);
 
+void xpfo_print_flags(unsigned long addr);
+
 #else /* !CONFIG_XPFO */
 
 static inline void xpfo_kmap(void *kaddr, struct page *page) { }
