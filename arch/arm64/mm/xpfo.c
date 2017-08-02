@@ -60,35 +60,36 @@ inline void set_kpte(void *kaddr, struct page *page, pgprot_t prot)
 inline void xpfo_dma_map_unmap_area(bool map, const void *addr, size_t size,
 				    int dir)
 {
-	unsigned long flags;
-	void *buf1 = NULL, *buf2 = NULL;
-	struct page *page = virt_to_page(addr);
-
-	/* Sanity check */
-	BUG_ON(size > PAGE_SIZE);
+	unsigned long flags, lineaddr = __dma_line_size(addr);
+	void *buf[size / PAGE_SIZE + 1];
+	int i;
+	unsigned long cur;
 
 	local_irq_save(flags);
 
 	/* Map the first page */
 	if (xpfo_page_is_unmapped(page))
-		buf1 = kmap_atomic(page);
+		buf[0] = kmap_atomic(page);
+	else
+		buf[0] = NULL;
 
-	/* Map the second page if the range crosses a page boundary */
-	if (((((unsigned long)addr + size - 1) & PAGE_MASK) !=
-	     ((unsigned long)addr & PAGE_MASK)) &&
-	    xpfo_page_is_unmapped(page + 1))
-		buf2 = kmap_atomic(page + 1);
+	/* Map the remaining pages */
+	for (cur = (unsigned long) addr + PAGE_SIZE, i = 1;
+			cur < (unsigned long) addr + size; cur += PAGE_SIZE, i++) {
+		if (xpfo_page_is_unmapped(page + i))
+			buf[i] = kmap_atomic(page + i);
+		else
+			buf[i] = NULL;
+	}
 
 	if (map)
 		__dma_map_area(addr, size, dir);
 	else
 		__dma_unmap_area(addr, size, dir);
 
-	if (buf1 != NULL)
-		kunmap_atomic(buf1);
-
-	if (buf2 != NULL)
-		kunmap_atomic(buf2);
+	for (i--; i >= 0; i--)
+		if (buf[i])
+			kunmap_atomic(buf[i]);
 
 	local_irq_restore(flags);
 }
