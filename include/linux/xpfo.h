@@ -43,6 +43,8 @@ void xpfo_temp_map(const void *addr, size_t size, void **mapping,
 void xpfo_temp_unmap(const void *addr, size_t size, void **mapping,
 		     size_t mapping_len);
 
+bool xpfo_enabled(void);
+
 #else /* !CONFIG_XPFO */
 
 static inline void xpfo_kmap(void *kaddr, struct page *page) { }
@@ -64,6 +66,8 @@ static inline void xpfo_temp_unmap(const void *addr, size_t size,
 {
 }
 
+
+static inline bool xpfo_enabled(void) { return false; }
 
 #endif /* CONFIG_XPFO */
 
