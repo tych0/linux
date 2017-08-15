@@ -13,6 +13,7 @@
  * the Free Software Foundation.
  */
 
+#include <linux/highmem.h>
 #include <linux/mm.h>
 #include <linux/module.h>
 #include <linux/page_ext.h>
@@ -235,3 +236,42 @@ bool xpfo_page_is_unmapped(struct page *page)
 	return test_bit(XPFO_PAGE_UNMAPPED, &xpfo->flags);
 }
 EXPORT_SYMBOL(xpfo_page_is_unmapped);
+
+void xpfo_temp_map(const void *addr, size_t size, void **mapping,
+		   size_t mapping_len)
+{
+	struct page *page = virt_to_page(addr);
+	int i, num = XPFO_TEMP_MAP_SIZE(addr, size);
+
+	memset(mapping, 0, mapping_len);
+
+	if (unlikely(mapping_len != sizeof(void *) * num)) {
+		WARN(1, "xpfo: temp map of wrong size, doing nothing\n");
+		return;
+	}
+
+	for (i = 0; i < num; i++) {
+		if (page_to_virt(page + i) >= addr + size)
+			break;
+
+		if (xpfo_page_is_unmapped(page + i))
+			mapping[i] = kmap_atomic(page + i);
+	}
+}
+EXPORT_SYMBOL(xpfo_temp_map);
+
+void xpfo_temp_unmap(const void *addr, size_t size, void **mapping,
+		     size_t mapping_len)
+{
+	int i, num = XPFO_TEMP_MAP_SIZE(addr, size);
+
+	if (unlikely(mapping_len != sizeof(void *) * num)) {
+		WARN(1, "xpfo: temp map of wrong size, doing nothing\n");
+		return;
+	}
+
+	for (i = 0; i < num; i++)
+		if (mapping[i])
+			kunmap_atomic(mapping[i]);
+}
+EXPORT_SYMBOL(xpfo_temp_unmap);
