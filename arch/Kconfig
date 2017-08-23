@@ -507,6 +507,12 @@ config GCC_PLUGIN_RANDSTRUCT_PERFORMANCE
 	  in structures.  This reduces the performance hit of RANDSTRUCT
 	  at the cost of weakened randomization.
 
+config GCC_PLUGIN_KERNULL
+	bool "Enable KerNULL, null checking instrumentation"
+	depends on GCC_PLUGINS
+	help
+	  KerNULL is an instrumentation pass for null checking. Use for testing.
+
 config HAVE_CC_STACKPROTECTOR
 	bool
 	help
