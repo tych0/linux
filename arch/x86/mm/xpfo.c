@@ -83,7 +83,7 @@ inline void set_kpte(void *kaddr, struct page *page, pgprot_t prot)
 
 }
 
-inline void xpfo_flush_kernel_tlb(struct page *page, int order)
+inline void xpfo_flush_kernel_tlb(struct page *page, int order, bool flush_all)
 {
 	int level;
 	unsigned long size, kaddr;
@@ -110,7 +110,12 @@ inline void xpfo_flush_kernel_tlb(struct page *page, int order)
 		return;
 	}
 
-	flush_tlb_kernel_range(kaddr, kaddr + (1 << order) * size);
+	if (flush_all)
+		flush_tlb_kernel_range(kaddr, kaddr + (1 << order) * size);
+	else if (order > 1)
+		flush_tlb_kernel_range(kaddr, kaddr + (1 << order) * size);
+	else
+		__flush_tlb_one(kaddr);
 }
 
 /* Convert a user space virtual address to a physical address.

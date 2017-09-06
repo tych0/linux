@@ -33,6 +33,13 @@ struct xpfo {
 	bool inited;		/* Map counter and lock initialized */
 	atomic_t mapcount;	/* Counter for balancing map/unmap requests */
 	spinlock_t maplock;	/* Lock to serialize map/unmap requests */
+
+	/*
+	 * Indicates whether the mapcount has ever gone above 1, i.e. whether
+	 * more than one CPU may have had this page mapped, so all TLBs need
+	 * flushed when it is unmapped
+	 */
+	bool all_flush;
 };
 
 DEFINE_STATIC_KEY_FALSE(xpfo_inited);
@@ -127,7 +134,7 @@ void xpfo_alloc_pages(struct page *page, int order, gfp_t gfp)
 	}
 
 	if (flush_tlb)
-		xpfo_flush_kernel_tlb(page, order);
+		xpfo_flush_kernel_tlb(page, order, true);
 }
 
 void xpfo_free_pages(struct page *page, int order)
@@ -182,11 +189,14 @@ void xpfo_kmap(void *kaddr, struct page *page)
 
 	/*
 	 * The page was previously allocated to user space, so map it back
-	 * into the kernel. No TLB flush required.
+	 * into the kernel. No TLB flush required. If this is not the first map
+	 * for the page, we need to flush all CPUs TLBs.
 	 */
 	if ((atomic_inc_return(&xpfo->mapcount) == 1) &&
 	    test_and_clear_bit(XPFO_PAGE_UNMAPPED, &xpfo->flags))
 		set_kpte(kaddr, page, PAGE_KERNEL);
+	else
+		xpfo->all_flush = true;
 
 	spin_unlock(&xpfo->maplock);
 }
@@ -221,7 +231,7 @@ void xpfo_kunmap(void *kaddr, struct page *page)
 		     "xpfo: unmapping already unmapped page\n");
 		set_bit(XPFO_PAGE_UNMAPPED, &xpfo->flags);
 		set_kpte(kaddr, page, __pgprot(0));
-		xpfo_flush_kernel_tlb(page, 0);
+		xpfo_flush_kernel_tlb(page, 0, xpfo->all_flush);
 	}
 
 	spin_unlock(&xpfo->maplock);
