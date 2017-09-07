@@ -70,4 +70,22 @@ static inline __must_check bool check_data_corruption(bool v) { return v; }
 		corruption;						 \
 	}))
 
+DECLARE_STATIC_KEY_FALSE(bug_on_corruption);
+DECLARE_STATIC_KEY_FALSE(kill_on_corruption);
+#define CORRUPT(condition, fmt, ...)	\
+	({				\
+		bool corruption = unlikely(condition);\
+		if (corruption) {\
+			if (static_key_unlikley(&bug_on_corruption)) {\
+				pr_err(fmt, ##__VA_ARGS__);		 \
+				BUG();\
+			}\
+\
+			WARN(1, fmt, ##__VA_ARGS__);		 \
+			if (static_key_unlikely(&kill_on_corruption) && current) {\
+				set_thread_flag(TIF_KILLME);\
+			}\
+		}\
+	})
+
 #endif	/* _LINUX_BUG_H */
