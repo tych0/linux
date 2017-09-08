@@ -209,6 +209,9 @@ __visible inline void prepare_exit_to_usermode(struct pt_regs *regs)
 #endif
 
 	user_enter_irqoff();
+
+	if (test_thread_flag(TIF_KILLME))
+		do_exit(SIGKILL);
 }
 
 #define SYSCALL_EXIT_WORK_FLAGS				\

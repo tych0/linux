@@ -4,6 +4,7 @@
 #include <asm/bug.h>
 #include <linux/compiler.h>
 #include <linux/build_bug.h>
+#include <linux/jump_label.h>
 
 enum bug_trap_type {
 	BUG_TRAP_TYPE_NONE = 0,
