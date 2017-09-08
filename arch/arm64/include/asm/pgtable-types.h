@@ -64,4 +64,6 @@ typedef struct { pteval_t pgprot; } pgprot_t;
 #include <asm-generic/5level-fixup.h>
 #endif
 
+extern pte_t *lookup_address(unsigned long addr, unsigned int *level);
+
 #endif	/* __ASM_PGTABLE_TYPES_H */

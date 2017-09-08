@@ -138,6 +138,32 @@ int set_memory_valid(unsigned long addr, int numpages, int enable)
 					__pgprot(PTE_VALID));
 }
 
+pte_t *lookup_address(unsigned long addr, unsigned int *level)
+{
+	pgd_t *pgd;
+	pud_t *pud;
+	pmd_t *pmd;
+
+	if (unlikely(level)) {
+		WARN(1, "level unused on arm64\n");
+		*level = 0;
+	}
+
+	pgd = pgd_offset_k(addr);
+	if (pgd_none(*pgd))
+		return NULL;
+
+	pud = pud_offset(pgd, addr);
+	if (pud_none(*pud))
+		return NULL;
+
+	pmd = pmd_offset(pud, addr);
+	if (pmd_none(*pmd))
+		return NULL;
+
+	return pte_offset_kernel(pmd, addr);
+}
+
 #ifdef CONFIG_DEBUG_PAGEALLOC
 void __kernel_map_pages(struct page *page, int numpages, int enable)
 {
@@ -156,29 +182,12 @@ void __kernel_map_pages(struct page *page, int numpages, int enable)
  */
 bool kernel_page_present(struct page *page)
 {
-	pgd_t *pgd;
-	pud_t *pud;
-	pmd_t *pmd;
-	pte_t *pte;
 	unsigned long addr = (unsigned long)page_address(page);
+	pte_t *pte = lookup_address(addr);
 
-	pgd = pgd_offset_k(addr);
-	if (pgd_none(*pgd))
+	if (!pte)
 		return false;
 
-	pud = pud_offset(pgd, addr);
-	if (pud_none(*pud))
-		return false;
-	if (pud_sect(*pud))
-		return true;
-
-	pmd = pmd_offset(pud, addr);
-	if (pmd_none(*pmd))
-		return false;
-	if (pmd_sect(*pmd))
-		return true;
-
-	pte = pte_offset_kernel(pmd, addr);
 	return pte_valid(*pte);
 }
 #endif /* CONFIG_HIBERNATION */
