@@ -27,7 +27,7 @@ void xpfo_flush_kernel_tlb(struct page *page, int order);
 
 void xpfo_kmap(void *kaddr, struct page *page);
 void xpfo_kunmap(void *kaddr, struct page *page);
-void xpfo_alloc_pages(struct page *page, int order, gfp_t gfp);
+void xpfo_alloc_pages(struct page *page, int order, gfp_t gfp, bool will_map);
 void xpfo_free_pages(struct page *page, int order);
 
 bool xpfo_page_is_unmapped(struct page *page);
@@ -47,7 +47,8 @@ void xpfo_temp_unmap(const void *addr, size_t size, void **mapping,
 
 static inline void xpfo_kmap(void *kaddr, struct page *page) { }
 static inline void xpfo_kunmap(void *kaddr, struct page *page) { }
-static inline void xpfo_alloc_pages(struct page *page, int order, gfp_t gfp) { }
+static inline void xpfo_alloc_pages(struct page *page, int order, gfp_t gfp,
+				    bool will_map) { }
 static inline void xpfo_free_pages(struct page *page, int order) { }
 
 static inline bool xpfo_page_is_unmapped(struct page *page) { return false; }

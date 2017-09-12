@@ -86,7 +86,7 @@ static inline struct xpfo *lookup_xpfo(struct page *page)
 	return (void *)page_ext + page_xpfo_ops.offset;
 }
 
-void xpfo_alloc_pages(struct page *page, int order, gfp_t gfp)
+void xpfo_alloc_pages(struct page *page, int order, gfp_t gfp, bool will_map)
 {
 	int i, flush_tlb = 0;
 	struct xpfo *xpfo;
@@ -116,8 +116,15 @@ void xpfo_alloc_pages(struct page *page, int order, gfp_t gfp)
 			 * Tag the page as a user page and flush the TLB if it
 			 * was previously allocated to the kernel.
 			 */
-			if (!test_and_set_bit(XPFO_PAGE_USER, &xpfo->flags))
+			bool was_kernel = !test_and_set_bit(XPFO_PAGE_USER,
+							    &xpfo->flags);
+
+			if (was_kernel || !will_map) {
+				set_bit(XPFO_PAGE_UNMAPPED, &xpfo->flags);
+				set_kpte(page_address(page + i), page + i,
+					 __pgprot(0));
 				flush_tlb = 1;
+			}
 		} else {
 			/* Tag the page as a non-user (kernel) page */
 			clear_bit(XPFO_PAGE_USER, &xpfo->flags);

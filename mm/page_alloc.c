@@ -1750,7 +1750,7 @@ static bool check_new_pages(struct page *page, unsigned int order)
 }
 
 inline void post_alloc_hook(struct page *page, unsigned int order,
-				gfp_t gfp_flags)
+				gfp_t gfp_flags, bool will_map)
 {
 	set_page_private(page, 0);
 	set_page_refcounted(page);
@@ -1759,7 +1759,7 @@ inline void post_alloc_hook(struct page *page, unsigned int order,
 	kernel_map_pages(page, 1 << order, 1);
 	kernel_poison_pages(page, 1 << order, 1);
 	kasan_alloc_pages(page, order);
-	xpfo_alloc_pages(page, order, gfp_flags);
+	xpfo_alloc_pages(page, order, gfp_flags, will_map);
 	set_page_owner(page, order, gfp_flags);
 }
 
@@ -1767,10 +1767,11 @@ static void prep_new_page(struct page *page, unsigned int order, gfp_t gfp_flags
 							unsigned int alloc_flags)
 {
 	int i;
+	bool needs_zero = !free_pages_prezeroed() && (gfp_flags & __GFP_ZERO);
 
-	post_alloc_hook(page, order, gfp_flags);
+	post_alloc_hook(page, order, gfp_flags, needs_zero);
 
-	if (!free_pages_prezeroed() && (gfp_flags & __GFP_ZERO))
+	if (needs_zero)
 		for (i = 0; i < (1 << order); i++)
 			clear_highpage(page + i);
 
