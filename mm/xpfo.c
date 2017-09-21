@@ -99,9 +99,6 @@ void xpfo_alloc_pages(struct page *page, int order, gfp_t gfp, bool will_map)
 		if (!xpfo)
 			continue;
 
-		WARN(test_bit(XPFO_PAGE_UNMAPPED, &xpfo->flags),
-		     "xpfo: unmapped page being allocated\n");
-
 		/* Initialize the map lock and map counter */
 		if (unlikely(!xpfo->inited)) {
 			spin_lock_init(&xpfo->maplock);
@@ -128,6 +125,14 @@ void xpfo_alloc_pages(struct page *page, int order, gfp_t gfp, bool will_map)
 		} else {
 			/* Tag the page as a non-user (kernel) page */
 			clear_bit(XPFO_PAGE_USER, &xpfo->flags);
+
+			/* If it was previously unmapped, re-map it. */
+			if (test_and_clear_bit(XPFO_PAGE_UNMAPPED,
+					       &xpfo->flags)) {
+				set_kpte(page_address(page + i), page + i,
+					 PAGE_KERNEL);
+				flush_tlb = 1;
+			}
 		}
 	}
 
@@ -137,32 +142,11 @@ void xpfo_alloc_pages(struct page *page, int order, gfp_t gfp, bool will_map)
 
 void xpfo_free_pages(struct page *page, int order)
 {
-	int i;
-	struct xpfo *xpfo;
-
-	if (!static_branch_unlikely(&xpfo_initialized))
-		return;
-
-	for (i = 0; i < (1 << order); i++) {
-		xpfo = lookup_xpfo(page + i);
-		if (!xpfo || unlikely(!xpfo->inited)) {
-			/*
-			 * The page was allocated before page_ext was
-			 * initialized, so it is a kernel page.
-			 */
-			continue;
-		}
-
-		/*
-		 * Map the page back into the kernel if it was previously
-		 * allocated to user space.
-		 */
-		if (test_and_clear_bit(XPFO_PAGE_USER, &xpfo->flags)) {
-			clear_bit(XPFO_PAGE_UNMAPPED, &xpfo->flags);
-			set_kpte(page_address(page + i), page + i,
-				 PAGE_KERNEL);
-		}
-	}
+	/*
+	 * Intentional no-op: we leave the pages potentially unmapped by the
+	 * kernel until they are needed by it. This saves us a potential TLB
+	 * flush when this page is allocated back to userspace again.
+	 */
 }
 
 void xpfo_kmap(void *kaddr, struct page *page)

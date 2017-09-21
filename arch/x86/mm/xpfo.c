@@ -1,10 +1,12 @@
 /*
+ * Copyright (C) 2017 Docker, Inc.
  * Copyright (C) 2017 Hewlett Packard Enterprise Development, L.P.
  * Copyright (C) 2016 Brown University. All rights reserved.
  *
  * Authors:
  *   Juerg Haefliger <juerg.haefliger@hpe.com>
  *   Vasileios P. Kemerlis <vpk@cs.brown.edu>
+ *   Tycho Andersen <tycho@docker.com>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published by
@@ -111,5 +113,17 @@ inline void xpfo_flush_kernel_tlb(struct page *page, int order)
 		return;
 	}
 
-	flush_tlb_kernel_range(kaddr, kaddr + (1 << order) * size);
+	/*
+	 * This really should be on all cpus; for now we just do it locally.
+	 * perhaps when we hoist this out of the allocation path we can be more
+	 * clever about doing it on all cpus
+	 */
+	if (1 << order < 33) {
+		int i;
+
+		for (i = 0; i < (1 << order); i++)
+			__flush_tlb_single((unsigned long) page_address(page + i));
+	} else {
+		__flush_tlb_all();
+	}
 }
