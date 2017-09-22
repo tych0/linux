@@ -2736,6 +2736,11 @@
 
 	nox2apic	[X86-64,APIC] Do not enable x2APIC mode.
 
+	noxpfo		[X86-64] Disable eXclusive Page Frame Ownership (XPFO)
+			Physical pages mapped into user applications will also be mapped in
+			the kernel's address space if CONFIG_XPFO was enabled.
+
+
 	cpu0_hotplug	[X86] Turn on CPU0 hotplug feature when
 			CONFIG_BOOTPARAM_HOTPLUG_CPU0 is off.
 			Some features depend on CPU0. Known dependencies are:
