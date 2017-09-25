@@ -19,6 +19,7 @@
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
 #include <linux/memblock.h>
+#include <linux/xpfo.h>
 
 #include <asm/sections.h>
 #include <linux/io.h>
@@ -583,6 +584,7 @@ repeat:
 		goto repeat;
 	} else {
 		memblock_merge_regions(type);
+		xpfo_phys_alloc(base, size);
 		return 0;
 	}
 }

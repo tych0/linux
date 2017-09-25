@@ -232,6 +232,39 @@ bool xpfo_page_is_unmapped(struct page *page)
 }
 EXPORT_SYMBOL(xpfo_page_is_unmapped);
 
+void __init_memblock xpfo_phys_alloc(phys_addr_t base, phys_addr_t size)
+{
+	phys_addr_t cur;
+	bool flush_tlb = false;
+
+	if (!static_branch_unlikely(&xpfo_initialized))
+		return;
+
+	for (cur = base; cur < base + size; cur += PAGE_SIZE) {
+		struct page *page = phys_to_page(cur);
+		struct xpfo *xpfo = lookup_xpfo(page);
+
+		if (unlikely(!xpfo) || !xpfo->inited)
+			continue;
+
+		/* Only the kernel does physical allocations */
+		clear_bit(XPFO_PAGE_UNMAPPED, &xpfo->flags);
+		clear_bit(XPFO_PAGE_USER, &xpfo->flags);
+		set_kpte(page_address(page), page, PAGE_KERNEL);
+		flush_tlb = true;
+	}
+
+	if (flush_tlb) {
+		unsigned long start = (unsigned long)phys_to_virt(base);
+		unsigned long end = (unsigned long)phys_to_virt(base + size);
+
+		/* FIXME: this should really be some form of
+		 * xpfo_flush_kernel_tlb() */
+		flush_tlb_kernel_range(start, end);
+	}
+}
+EXPORT_SYMBOL(xpfo_phys_alloc);
+
 void xpfo_temp_map(const void *addr, size_t size, void **mapping,
 		   size_t mapping_len)
 {

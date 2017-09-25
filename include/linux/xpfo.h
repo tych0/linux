@@ -16,6 +16,9 @@
 #ifndef _LINUX_XPFO_H
 #define _LINUX_XPFO_H
 
+#include <linux/types.h>
+#include <linux/memblock.h>
+
 #ifdef CONFIG_XPFO
 
 extern struct page_ext_operations page_xpfo_ops;
@@ -43,6 +46,8 @@ void xpfo_temp_map(const void *addr, size_t size, void **mapping,
 void xpfo_temp_unmap(const void *addr, size_t size, void **mapping,
 		     size_t mapping_len);
 
+void __init_memblock xpfo_phys_alloc(phys_addr_t base, phys_addr_t size);
+
 #else /* !CONFIG_XPFO */
 
 static inline void xpfo_kmap(void *kaddr, struct page *page) { }
@@ -62,6 +67,7 @@ static inline void xpfo_temp_map(const void *addr, size_t size, void **mapping,
 
 static inline void xpfo_temp_unmap(const void *addr, size_t size,
 				   void **mapping, size_t mapping_len) { }
+static inline xpfo_phys_alloc(phys_addr_t base, phys_addr_t size) { }
 #endif /* CONFIG_XPFO */
 
 #endif /* _LINUX_XPFO_H */
