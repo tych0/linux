@@ -679,12 +679,22 @@ void blk_cleanup_queue(struct request_queue *q)
 }
 EXPORT_SYMBOL(blk_cleanup_queue);
 
+extern bool xpfo_log;
 /* Allocate memory local to the request queue */
 static void *alloc_request_simple(gfp_t gfp_mask, void *data)
 {
 	struct request_queue *q = data;
+	void *ret;
+	static bool logged = false;
 
-	return kmem_cache_alloc_node(request_cachep, gfp_mask, q->node);
+	if (!logged) {
+		logged = true;
+		xpfo_log = true;
+	}
+
+	ret = kmem_cache_alloc_node(request_cachep, gfp_mask, q->node);
+	xpfo_log = false;
+	return ret;
 }
 
 static void free_request_simple(void *element, void *data)
@@ -692,13 +702,20 @@ static void free_request_simple(void *element, void *data)
 	kmem_cache_free(request_cachep, element);
 }
 
+extern bool xpfo_log;
 static void *alloc_request_size(gfp_t gfp_mask, void *data)
 {
 	struct request_queue *q = data;
 	struct request *rq;
+	static bool logged = false;
 
+	if (!logged) {
+		logged = true;
+		xpfo_log = true;
+	}
 	rq = kmalloc_node(sizeof(struct request) + q->cmd_size, gfp_mask,
 			q->node);
+	xpfo_log = false;
 	if (rq && q->init_rq_fn && q->init_rq_fn(q, rq, gfp_mask) < 0) {
 		kfree(rq);
 		rq = NULL;
@@ -728,10 +745,12 @@ int blk_init_rl(struct request_list *rl, struct request_queue *q,
 	init_waitqueue_head(&rl->wait[BLK_RW_ASYNC]);
 
 	if (q->cmd_size) {
+		WARN(1, "creating pool with cmd size: %lu\n", q->cmd_size);
 		rl->rq_pool = mempool_create_node(BLKDEV_MIN_RQ,
 				alloc_request_size, free_request_size,
 				q, gfp_mask, q->node);
 	} else {
+		WARN(1, "creating pool\n");
 		rl->rq_pool = mempool_create_node(BLKDEV_MIN_RQ,
 				alloc_request_simple, free_request_simple,
 				q, gfp_mask, q->node);

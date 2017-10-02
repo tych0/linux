@@ -18,6 +18,7 @@
 #include <linux/module.h>
 #include <linux/page_ext.h>
 #include <linux/xpfo.h>
+#include <linux/stacktrace.h>
 
 #include <asm/tlbflush.h>
 
@@ -27,17 +28,25 @@ enum xpfo_flags {
 	XPFO_PAGE_UNMAPPED,	/* Page is unmapped from the linear map */
 };
 
+#define XPFO_DEBUG
+
 /* Per-page XPFO house-keeping data */
 struct xpfo {
 	unsigned long flags;	/* Page state */
 	bool inited;		/* Map counter and lock initialized */
 	atomic_t mapcount;	/* Counter for balancing map/unmap requests */
 	spinlock_t maplock;	/* Lock to serialize map/unmap requests */
+#ifdef XPFO_DEBUG
+	struct stack_trace trace;
+	unsigned long entries[20];
+#endif
 };
 
 DEFINE_STATIC_KEY_FALSE(xpfo_initialized);
 
 static bool xpfo_disabled __initdata;
+
+bool xpfo_log;
 
 static int __init noxpfo_param(char *str)
 {
@@ -91,6 +100,9 @@ void xpfo_alloc_pages(struct page *page, int order, gfp_t gfp, bool will_map)
 	int i, flush_tlb = 0;
 	struct xpfo *xpfo;
 
+	if (xpfo_log)
+		WARN(1, "xpfo_log\n");
+
 	if (!static_branch_unlikely(&xpfo_initialized))
 		return;
 
@@ -104,7 +116,18 @@ void xpfo_alloc_pages(struct page *page, int order, gfp_t gfp, bool will_map)
 			spin_lock_init(&xpfo->maplock);
 			atomic_set(&xpfo->mapcount, 0);
 			xpfo->inited = true;
+#ifdef XPFO_DEBUG
+			xpfo->trace.max_entries = 20;
+			xpfo->trace.skip = 2;
+			xpfo->trace.entries = xpfo->entries;
+#endif
 		}
+
+#ifdef XPFO_DEBUG
+		xpfo->trace.nr_entries = 0;
+		save_stack_trace(&xpfo->trace);
+#endif
+
 		WARN(atomic_read(&xpfo->mapcount),
 		     "xpfo: already mapped page being allocated\n");
 
@@ -147,6 +170,17 @@ void xpfo_free_pages(struct page *page, int order)
 	 * kernel until they are needed by it. This saves us a potential TLB
 	 * flush when this page is allocated back to userspace again.
 	 */
+#ifdef XPFO_DEBUG
+	struct xpfo *xpfo = lookup_xpfo(page);
+
+	if (!static_branch_unlikely(&xpfo_initialized))
+		return;
+
+	if (!xpfo)
+		return;
+
+	xpfo->trace.nr_entries = 0;
+#endif
 }
 
 void xpfo_kmap(void *kaddr, struct page *page)
@@ -260,3 +294,27 @@ void xpfo_temp_unmap(const void *addr, size_t size, void **mapping,
 			kunmap_atomic(mapping[i]);
 }
 EXPORT_SYMBOL(xpfo_temp_unmap);
+
+#ifdef XPFO_DEBUG
+void show_xpfo(unsigned long address)
+{
+	struct page *page = virt_to_page(address);
+	struct xpfo *xpfo = lookup_xpfo(page);
+
+	if (!xpfo) {
+		printk("no xpfo data\n");
+		return;
+	}
+
+	if (test_bit(XPFO_PAGE_UNMAPPED, &xpfo->flags)) {
+		printk("XPFO_PAGE_UNMAPPED\n");
+	}
+	if (test_bit(XPFO_PAGE_USER, &xpfo->flags)) {
+		printk("XPFO_PAGE_USER\n");
+	}
+
+	printk("mapcount %d\n", atomic_read(&xpfo->mapcount));
+	printk("allocation location:\n");
+	print_stack_trace(&xpfo->trace, 2);
+}
+#endif

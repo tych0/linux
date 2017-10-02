@@ -214,6 +214,8 @@ static inline bool is_permission_fault(unsigned int esr, struct pt_regs *regs,
 	return false;
 }
 
+extern void show_xpfo(unsigned long address);
+
 /*
  * The kernel tried to access some page that wasn't present.
  */
@@ -247,6 +249,8 @@ static void __do_kernel_fault(unsigned long addr, unsigned int esr,
 
 	pr_alert("Unable to handle kernel %s at virtual address %08lx\n", msg,
 		 addr);
+
+	show_xpfo(addr);
 
 	show_pte(addr);
 	die("Oops", regs, esr);
