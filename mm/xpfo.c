@@ -30,9 +30,15 @@ enum xpfo_flags {
 /* Per-page XPFO house-keeping data */
 struct xpfo {
 	unsigned long flags;	/* Page state */
-	bool inited;		/* Map counter and lock initialized */
+	bool initialized;		/* Map counter and lock initialized */
 	atomic_t mapcount;	/* Counter for balancing map/unmap requests */
 	spinlock_t maplock;	/* Lock to serialize map/unmap requests */
+	struct stack_trace trace;
+	unsigned long entries[20];
+	struct stack_trace trace2;
+	unsigned long entries2[20];
+	enum migratetype migratetype;
+	gfp_t gfp;
 };
 
 DEFINE_STATIC_KEY_FALSE(xpfo_initialized);
@@ -88,6 +94,7 @@ static inline struct xpfo *lookup_xpfo(struct page *page)
 
 void xpfo_alloc_pages(struct page *page, int order, gfp_t gfp, bool will_map)
 {
+
 	int i, flush_tlb = 0;
 	struct xpfo *xpfo;
 
@@ -99,15 +106,17 @@ void xpfo_alloc_pages(struct page *page, int order, gfp_t gfp, bool will_map)
 		if (!xpfo)
 			continue;
 
+		xpfo->gfp = gfp;
+		save_stack_trace(&xpfo->trace2);
+	}
+
+#if 0
 		/* Initialize the map lock and map counter */
-		if (unlikely(!xpfo->inited)) {
+		if (unlikely(!xpfo->initialized)) {
 			spin_lock_init(&xpfo->maplock);
 			atomic_set(&xpfo->mapcount, 0);
-			xpfo->inited = true;
+			xpfo->initialized = true;
 		}
-		WARN(atomic_read(&xpfo->mapcount),
-		     "xpfo: already mapped page being allocated\n");
-
 		if ((gfp & GFP_HIGHUSER) == GFP_HIGHUSER) {
 			/*
 			 * Tag the page as a user page and flush the TLB if it
@@ -138,15 +147,11 @@ void xpfo_alloc_pages(struct page *page, int order, gfp_t gfp, bool will_map)
 
 	if (flush_tlb)
 		xpfo_flush_kernel_tlb(page, order);
+#endif
 }
 
 void xpfo_free_pages(struct page *page, int order)
 {
-	/*
-	 * Intentional no-op: we leave the pages potentially unmapped by the
-	 * kernel until they are needed by it. This saves us a potential TLB
-	 * flush when this page is allocated back to userspace again.
-	 */
 }
 
 void xpfo_kmap(void *kaddr, struct page *page)
@@ -163,7 +168,7 @@ void xpfo_kmap(void *kaddr, struct page *page)
 	 * it's a kernel page) or it's allocated to the kernel, so nothing to
 	 * do.
 	 */
-	if (!xpfo || unlikely(!xpfo->inited) ||
+	if (!xpfo || unlikely(!xpfo->initialized) ||
 	    !test_bit(XPFO_PAGE_USER, &xpfo->flags))
 		return;
 
@@ -195,7 +200,7 @@ void xpfo_kunmap(void *kaddr, struct page *page)
 	 * it's a kernel page) or it's allocated to the kernel, so nothing to
 	 * do.
 	 */
-	if (!xpfo || unlikely(!xpfo->inited) ||
+	if (!xpfo || unlikely(!xpfo->initialized) ||
 	    !test_bit(XPFO_PAGE_USER, &xpfo->flags))
 		return;
 
@@ -225,7 +230,7 @@ bool xpfo_page_is_unmapped(struct page *page)
 		return false;
 
 	xpfo = lookup_xpfo(page);
-	if (unlikely(!xpfo) && !xpfo->inited)
+	if (unlikely(!xpfo) && !xpfo->initialized)
 		return false;
 
 	return test_bit(XPFO_PAGE_UNMAPPED, &xpfo->flags);
@@ -260,3 +265,85 @@ void xpfo_temp_unmap(const void *addr, size_t size, void **mapping,
 			kunmap_atomic(mapping[i]);
 }
 EXPORT_SYMBOL(xpfo_temp_unmap);
+
+void xpfo_pcp_refill(struct page *page, enum migratetype migratetype, int order)
+{
+	int i;
+	bool flush_tlb = false;
+
+	if (!static_branch_unlikely(&xpfo_initialized))
+		return;
+
+	for (i = 0; i < 1 << order; i++) {
+		struct xpfo *xpfo;
+
+		xpfo = lookup_xpfo(page + i);
+		if (!xpfo)
+			continue;
+
+		if (unlikely(!xpfo->initialized)) {
+			spin_lock_init(&xpfo->maplock);
+			atomic_set(&xpfo->mapcount, 0);
+			xpfo->initialized = true;
+		}
+
+		xpfo->trace.max_entries = 20;
+		xpfo->trace.skip = 1;
+		xpfo->trace.entries = xpfo->entries;
+		xpfo->trace.nr_entries = 0;
+		xpfo->trace2.max_entries = 20;
+		xpfo->trace2.skip = 1;
+		xpfo->trace2.entries = xpfo->entries2;
+		xpfo->trace2.nr_entries = 0;
+
+		xpfo->migratetype = migratetype;
+
+		save_stack_trace(&xpfo->trace);
+
+		if (migratetype == MIGRATE_MOVABLE) {
+			/* GPF_HIGHUSER */
+			set_kpte(page_address(page + i), page + i, __pgprot(0));
+			if (!test_and_set_bit(XPFO_PAGE_UNMAPPED, &xpfo->flags))
+				flush_tlb = true;
+			set_bit(XPFO_PAGE_USER, &xpfo->flags);
+		} else {
+			/*
+			 * GFP_KERNEL and everything else; for now we just
+			 * leave it mapped
+			 */
+			set_kpte(page_address(page + i), page + i, PAGE_KERNEL);
+			if (test_and_clear_bit(XPFO_PAGE_UNMAPPED, &xpfo->flags))
+				flush_tlb = true;
+			clear_bit(XPFO_PAGE_USER, &xpfo->flags);
+		}
+	}
+
+	if (flush_tlb)
+		xpfo_flush_kernel_tlb(page, order);
+}
+
+void show_xpfo(unsigned long address)
+{
+	struct page *page = virt_to_page(address);
+	struct xpfo *xpfo = lookup_xpfo(page);
+
+	if (!xpfo) {
+		printk("no xpfo data\n");
+		return;
+	}
+
+	if (test_bit(XPFO_PAGE_UNMAPPED, &xpfo->flags)) {
+		printk("XPFO_PAGE_UNMAPPED\n");
+	}
+	if (test_bit(XPFO_PAGE_USER, &xpfo->flags)) {
+		printk("XPFO_PAGE_USER\n");
+	}
+
+	printk("allocation location:\n");
+	print_stack_trace(&xpfo->trace, 2);
+	printk("allocation2 location:\n");
+	print_stack_trace(&xpfo->trace2, 2);
+	printk("migratetype: %d\n", xpfo->migratetype);
+	printk("gfp: %u\n", xpfo->gfp);
+	printk("gfpflags_to_migratetype(GFP_KERNEL): %d\n", gfpflags_to_migratetype(GFP_KERNEL));
+}

@@ -199,6 +199,8 @@ static int free_vm_stack_cache(unsigned int cpu)
 }
 #endif
 
+extern bool xpfo_log;
+
 static unsigned long *alloc_thread_stack_node(struct task_struct *tsk, int node)
 {
 #ifdef CONFIG_VMAP_STACK

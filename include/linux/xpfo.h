@@ -40,7 +40,9 @@ void xpfo_temp_map(const void *addr, size_t size, void **mapping,
 		   size_t mapping_len);
 void xpfo_temp_unmap(const void *addr, size_t size, void **mapping,
 		     size_t mapping_len);
-
+void xpfo_pcp_refill(struct page *page, enum migratetype migratetype,
+		     int order);
+void show_xpfo(unsigned long address);
 #else /* !CONFIG_XPFO */
 
 static inline void xpfo_kmap(void *kaddr, struct page *page) { }
@@ -60,6 +62,7 @@ static inline void xpfo_temp_map(const void *addr, size_t size, void **mapping,
 
 static inline void xpfo_temp_unmap(const void *addr, size_t size,
 				   void **mapping, size_t mapping_len) { }
+static inline void show_xpfo(unsigned long address) { }
 #endif /* CONFIG_XPFO */
 
 #endif /* _LINUX_XPFO_H */

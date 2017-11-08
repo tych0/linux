@@ -2306,6 +2306,9 @@ static int ext4_check_descriptors(struct super_block *sb,
 	int flexbg_flag = 0;
 	ext4_group_t i, grp = sbi->s_groups_count;
 
+	printk("in check descriptors, sbi is: %p\n", sbi);
+	printk("in check descriptors, sb is: %p\n", sb);
+
 	if (ext4_has_feature_flex_bg(sb))
 		flexbg_flag = 1;
 
@@ -2314,15 +2317,19 @@ static int ext4_check_descriptors(struct super_block *sb,
 	for (i = 0; i < sbi->s_groups_count; i++) {
 		struct ext4_group_desc *gdp = ext4_get_group_desc(sb, i, NULL);
 
+		printk("sb: %p, EXT4_SB(sb): %p\n", sb, EXT4_SB(sb));
 		if (i == sbi->s_groups_count - 1 || flexbg_flag)
 			last_block = ext4_blocks_count(sbi->s_es) - 1;
 		else
 			last_block = first_block +
 				(EXT4_BLOCKS_PER_GROUP(sb) - 1);
+		printk("done\n");
+		printk("gdp: %p\n", gdp);
 
 		if ((grp == sbi->s_groups_count) &&
 		   !(gdp->bg_flags & cpu_to_le16(EXT4_BG_INODE_ZEROED)))
 			grp = i;
+		printk("done2\n");
 
 		block_bitmap = ext4_block_bitmap(sb, gdp);
 		if (block_bitmap == sb_block) {
@@ -2330,6 +2337,7 @@ static int ext4_check_descriptors(struct super_block *sb,
 				 "Block bitmap for group %u overlaps "
 				 "superblock", i);
 		}
+		printk("done3\n");
 		if (block_bitmap < first_block || block_bitmap > last_block) {
 			ext4_msg(sb, KERN_ERR, "ext4_check_descriptors: "
 			       "Block bitmap for group %u not in group "
@@ -3401,6 +3409,8 @@ static int ext4_fill_super(struct super_block *sb, void *data, int silent)
 
 	if ((data && !orig_data) || !sbi)
 		goto out_free_base;
+
+	printk("ext4 sbi: %p\n", sbi);
 
 	sbi->s_blockgroup_lock =
 		kzalloc(sizeof(struct blockgroup_lock), GFP_KERNEL);

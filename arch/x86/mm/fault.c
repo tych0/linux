@@ -864,6 +864,8 @@ no_context(struct pt_regs *regs, unsigned long error_code,
 	/* Executive summary in case the body of the oops scrolled away */
 	printk(KERN_DEFAULT "CR2: %016lx\n", address);
 
+	show_xpfo(address);
+
 	/*
 	 * We're about to oops, which might kill the task. Make sure we're
 	 * allowed to sleep.
