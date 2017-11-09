@@ -46,7 +46,11 @@
 #include <net/sock.h>
 #include <net/raw.h>
 
-#define TCPUDP_MIB_MAX max_t(u32, UDP_MIB_MAX, TCP_MIB_MAX)
+/* we should probably change max_t to just do this instead -- all the dynamic
+ * stuff is unnecessary since we're casting anywa.
+ */
+#define my_max_t(t, x, y) ((t)x > (t)y ? (t)x : (t)y)
+#define TCPUDP_MIB_MAX my_max_t(u32, UDP_MIB_MAX, TCP_MIB_MAX)
 
 /*
  *	Report socket allocation statistics [mea@utu.fi]
