@@ -3930,18 +3930,21 @@ static int ftrace_hash_move_and_update_ops(struct ftrace_ops *ops,
 	return ret;
 }
 
+
 static bool module_exists(const char *module)
 {
-	/* All modules have the symbol __this_module */
-	const char this_mod[] = "__this_module";
-	const int modname_size = MAX_PARAM_PREFIX_LEN + sizeof(this_mod) + 1;
-	char modname[modname_size + 1];
+/* All modules have the symbol __this_module */
+#define THIS_MOD "__this_module"
+/* why do we need +2, null is already accounted for in sizeof()? */
+#define MODNAME_SIZE MAX_PARAM_PREFIX_LEN + sizeof(THIS_MOD) + 2
+
+	char modname[MODNAME_SIZE];
 	unsigned long val;
 	int n;
 
-	n = snprintf(modname, modname_size + 1, "%s:%s", module, this_mod);
+	n = snprintf(modname, MODNAME_SIZE, "%s:%s", module, THIS_MOD);
 
-	if (n > modname_size)
+	if (n >= MODNAME_SIZE)
 		return false;
 
 	val = module_kallsyms_lookup_name(modname);
