@@ -408,20 +408,20 @@ static int btrfs_check_super_csum(struct btrfs_fs_info *fs_info,
 	int ret = 0;
 
 	if (csum_type == BTRFS_CSUM_TYPE_CRC32) {
+#define BTRFS_CHECK_SUPER_CSUM_SIZE sizeof(u32)
 		u32 crc = ~(u32)0;
-		const int csum_size = sizeof(crc);
-		char result[csum_size];
+		char result[BTRFS_CHECK_SUPER_CSUM_SIZE];
 
 		/*
 		 * The super_block structure does not span the whole
 		 * BTRFS_SUPER_INFO_SIZE range, we expect that the unused space
 		 * is filled with zeros and is included in the checksum.
 		 */
-		crc = btrfs_csum_data(raw_disk_sb + BTRFS_CSUM_SIZE,
-				crc, BTRFS_SUPER_INFO_SIZE - BTRFS_CSUM_SIZE);
+		crc = btrfs_csum_data(raw_disk_sb + BTRFS_CSUM_SIZE, crc,
+				      BTRFS_SUPER_INFO_SIZE - BTRFS_CSUM_SIZE);
 		btrfs_csum_final(crc, result);
 
-		if (memcmp(raw_disk_sb, result, csum_size))
+		if (memcmp(raw_disk_sb, result, BTRFS_CHECK_SUPER_CSUM_SIZE))
 			ret = 1;
 	}
 
