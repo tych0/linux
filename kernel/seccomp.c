@@ -1605,4 +1605,28 @@ static struct file *init_listener(struct seccomp_filter *filter)
 	mutex_unlock(&filter->notify_lock);
 	return ret;
 }
+
+long seccomp_get_listener(struct task_struct *task,
+			  unsigned long filter_off)
+{
+	struct seccomp_filter *filter;
+	struct file *listener;
+	int fd;
+
+	filter = get_nth_filter(task, filter_off);
+	if (IS_ERR(filter))
+		return PTR_ERR(filter);
+
+	listener = init_listener(filter);
+	if (IS_ERR(listener))
+		return PTR_ERR(listener);
+
+	fd = get_unused_fd_flags(O_RDWR);
+	if (fd < 0)
+		put_filp(listener);
+	else
+		fd_install(fd, listener);
+
+	return fd;
+}
 #endif
