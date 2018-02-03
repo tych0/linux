@@ -40,6 +40,7 @@
 #include <sys/fcntl.h>
 #include <sys/mman.h>
 #include <sys/times.h>
+#include <sys/socket.h>
 
 #define _GNU_SOURCE
 #include <unistd.h>
@@ -147,6 +148,24 @@ struct seccomp_data {
 struct seccomp_metadata {
 	__u64 filter_off;       /* Input: which filter */
 	__u64 flags;             /* Output: filter's flags */
+};
+#endif
+
+#ifndef SECCOMP_FILTER_FLAG_GET_LISTENER
+#define SECCOMP_FILTER_FLAG_GET_LISTENER 4
+
+#define SECCOMP_RET_USER_NOTIF 0x7fc00000U
+
+struct seccomp_notif {
+	__u32 id;
+	pid_t pid;
+	struct seccomp_data data;
+};
+
+struct seccomp_notif_resp {
+	__u32 id;
+	int error;
+	long val;
 };
 #endif
 
@@ -2072,7 +2091,8 @@ TEST(seccomp_syscall_mode_lock)
 TEST(detect_seccomp_filter_flags)
 {
 	unsigned int flags[] = { SECCOMP_FILTER_FLAG_TSYNC,
-				 SECCOMP_FILTER_FLAG_LOG };
+				 SECCOMP_FILTER_FLAG_LOG,
+				 SECCOMP_FILTER_FLAG_GET_LISTENER };
 	unsigned int flag, all_flags;
 	int i;
 	long ret;
@@ -2904,6 +2924,98 @@ TEST(get_metadata)
 	EXPECT_EQ(md.filter_off, 1);
 
 	ASSERT_EQ(0, kill(pid, SIGKILL));
+}
+
+static int user_trap_syscall(int nr, unsigned int flags)
+{
+	struct sock_filter filter[] = {
+		BPF_STMT(BPF_LD+BPF_W+BPF_ABS,
+			offsetof(struct seccomp_data, nr)),
+		BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, nr, 0, 1),
+		BPF_STMT(BPF_RET+BPF_K, SECCOMP_RET_USER_NOTIF),
+		BPF_STMT(BPF_RET+BPF_K, SECCOMP_RET_ALLOW),
+	};
+
+	struct sock_fprog prog = {
+		.len = (unsigned short)ARRAY_SIZE(filter),
+		.filter = filter,
+	};
+
+	return seccomp(SECCOMP_SET_MODE_FILTER, flags, &prog);
+}
+
+#define USER_NOTIF_MAGIC 116983961184613L
+TEST(get_user_notification_syscall)
+{
+	pid_t pid;
+	long ret;
+	int status, listener;
+	struct seccomp_notif req;
+	struct seccomp_notif_resp resp;
+
+	pid = fork();
+	ASSERT_GE(pid, 0);
+
+	/* Check that we get -ENOSYS with no listener attached */
+	if (pid == 0) {
+		ASSERT_EQ(user_trap_syscall(__NR_getpid, 0), 0);
+		ret = syscall(__NR_getpid);
+		exit(ret >= 0 || errno != ENOSYS);
+	}
+
+	ASSERT_EQ(waitpid(pid, &status, 0), pid);
+	ASSERT_EQ(true, WIFEXITED(status));
+	ASSERT_EQ(0, WEXITSTATUS(status));
+
+	/* Check that the basic notification machinery works */
+	listener = user_trap_syscall(__NR_getpid,
+				     SECCOMP_FILTER_FLAG_GET_LISTENER);
+	ASSERT_GE(listener, 0);
+
+	pid = fork();
+	ASSERT_GE(pid, 0);
+
+	if (pid == 0) {
+		ret = syscall(__NR_getpid);
+		exit(ret != USER_NOTIF_MAGIC);
+	}
+
+	ASSERT_EQ(read(listener, &req, sizeof(req)), sizeof(req));
+
+	resp.id = req.id;
+	resp.error = 0;
+	resp.val = USER_NOTIF_MAGIC;
+
+	ASSERT_EQ(write(listener, &resp, sizeof(resp)), sizeof(resp));
+
+	ASSERT_EQ(waitpid(pid, &status, 0), pid);
+	ASSERT_EQ(true, WIFEXITED(status));
+	ASSERT_EQ(0, WEXITSTATUS(status));
+
+	/*
+	 * Check that nothing bad happens when we kill the task in the middle
+	 * of a syscall.
+	 */
+	pid = fork();
+	ASSERT_GE(pid, 0);
+
+	if (pid == 0) {
+		ret = syscall(__NR_getpid);
+		exit(ret != USER_NOTIF_MAGIC);
+	}
+
+	ret = read(listener, &req, sizeof(req));
+	ASSERT_EQ(ret, sizeof(req));
+
+	ASSERT_EQ(kill(pid, SIGKILL), 0);
+	ASSERT_EQ(waitpid(pid, NULL, 0), pid);
+
+	resp.id = req.id;
+	ret = write(listener, &resp, sizeof(resp));
+	EXPECT_EQ(ret, -1);
+	EXPECT_EQ(errno, EINVAL);
+
+	close(listener);
 }
 
 /*
