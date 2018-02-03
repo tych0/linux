@@ -210,7 +210,7 @@ acquired via:
 
 .. code-block::
 
-    fd = ptrace(PTRACE_SECCOMP_NEW_LISTENER, pid, 0);
+    fd = ptrace(PTRACE_SECCOMP_NEW_LISTENER, pid, 0, 0);
 
 which grabs the 0th filter for some task which the tracer has privilege over.
 Note that filter fds correspond to a particular filter, and not a particular

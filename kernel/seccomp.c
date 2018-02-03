@@ -1483,6 +1483,37 @@ out:
 	return filter;
 }
 
+int seccomp_new_listener(struct task_struct *task,
+			 unsigned long filter_off)
+{
+	struct seccomp_filter *filter;
+	struct file *listener;
+	int fd;
+
+	if (!capable(CAP_SYS_ADMIN))
+		return -EACCES;
+
+	filter = get_nth_filter(task, filter_off);
+	if (IS_ERR(filter))
+		return PTR_ERR(filter);
+
+	fd = get_unused_fd_flags(O_CLOEXEC);
+	if (fd < 0) {
+		__put_seccomp_filter(filter);
+		return fd;
+	}
+
+	listener = init_listener(task, filter);
+	__put_seccomp_filter(filter);
+	if (IS_ERR(listener)) {
+		put_unused_fd(fd);
+		return PTR_ERR(listener);
+	}
+
+	fd_install(fd, listener);
+	return fd;
+}
+
 #if defined(CONFIG_CHECKPOINT_RESTORE)
 long seccomp_get_filter(struct task_struct *task, unsigned long filter_off,
 			void __user *data)
@@ -1798,5 +1829,4 @@ static int __init seccomp_sysctl_init(void)
 }
 
 device_initcall(seccomp_sysctl_init)
-
 #endif /* CONFIG_SYSCTL */
