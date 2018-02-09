@@ -2962,7 +2962,8 @@ TEST(get_user_notification_syscall)
 
 	/* Check that we get -ENOSYS with no listener attached */
 	if (pid == 0) {
-		ASSERT_EQ(user_trap_syscall(__NR_getpid, 0), 0);
+		if (user_trap_syscall(__NR_getpid, 0) < 0)
+			exit(1);
 		ret = syscall(__NR_getpid);
 		exit(ret >= 0 || errno != ENOSYS);
 	}
@@ -2975,6 +2976,12 @@ TEST(get_user_notification_syscall)
 	listener = user_trap_syscall(__NR_getpid,
 				     SECCOMP_FILTER_FLAG_GET_LISTENER);
 	ASSERT_GE(listener, 0);
+
+	/* Installing a second listener in the chain should EBUSY */
+	EXPECT_EQ(user_trap_syscall(__NR_getpid,
+				    SECCOMP_FILTER_FLAG_GET_LISTENER),
+		  -1);
+	ASSERT_EQ(errno, EBUSY);
 
 	pid = fork();
 	ASSERT_GE(pid, 0);

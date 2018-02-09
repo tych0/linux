@@ -1631,17 +1631,18 @@ static struct file *init_listener(struct seccomp_filter *filter)
 	 */
 	for (cur = filter; cur; cur = cur->prev) {
 		mutex_lock(&cur->notify_lock);
-		if (filter->has_listener)
+		if (cur->has_listener)
 			break;
 	}
 
 	if (cur) {
 		struct seccomp_filter *last;
 
-		last = cur;
+		last = cur->prev;
 		for (cur = filter; cur != last; cur = cur->prev)
 			mutex_unlock(&cur->notify_lock);
 		fput(ret);
+		printk("giving -EBUSY\n");
 		return ERR_PTR(-EBUSY);
 	}
 
