@@ -304,17 +304,28 @@ void ima_store_measurement(struct integrity_iint_cache *iint,
 		ima_free_template_entry(entry);
 }
 
-void ima_audit_measurement(struct integrity_iint_cache *iint,
-			   const unsigned char *filename)
+int ima_audit_measurement(struct integrity_iint_cache *iint,
+			  const unsigned char *filename)
 {
 	struct audit_buffer *ab;
-	char hash[(iint->ima_hash->length * 2) + 1];
+	char *hash, *algo_hash;
 	const char *algo_name = hash_algo_name[iint->ima_hash->algo];
-	char algo_hash[sizeof(hash) + strlen(algo_name) + 2];
-	int i;
+	int i, hash_len, algo_hash_len;
 
 	if (iint->flags & IMA_AUDITED)
-		return;
+		return 0;
+
+	hash_len = (iint->ima_hash->length * 2) + 1;
+	hash = kzalloc(hash_len, GFP_KERNEL);
+	if (!hash)
+		return -ENOMEM;
+
+	algo_hash_len = hash_len + strlen(algo_name) + 2;
+	algo_hash = kzalloc(algo_hash_len, GFP_KERNEL);
+	if (!algo_hash) {
+		kfree(hash);
+		return -ENOMEM;
+	}
 
 	for (i = 0; i < iint->ima_hash->length; i++)
 		hex_byte_pack(hash + (i * 2), iint->ima_hash->digest[i]);
@@ -323,18 +334,22 @@ void ima_audit_measurement(struct integrity_iint_cache *iint,
 	ab = audit_log_start(current->audit_context, GFP_KERNEL,
 			     AUDIT_INTEGRITY_RULE);
 	if (!ab)
-		return;
+		goto out;
 
 	audit_log_format(ab, "file=");
 	audit_log_untrustedstring(ab, filename);
 	audit_log_format(ab, " hash=");
-	snprintf(algo_hash, sizeof(algo_hash), "%s:%s", algo_name, hash);
+	snprintf(algo_hash, algo_hash_len, "%s:%s", algo_name, hash);
 	audit_log_untrustedstring(ab, algo_hash);
 
 	audit_log_task_info(ab, current);
 	audit_log_end(ab);
 
 	iint->flags |= IMA_AUDITED;
+out:
+	kfree(hash);
+	kfree(algo_hash);
+	return 0;
 }
 
 /*
