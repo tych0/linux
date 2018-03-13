@@ -108,13 +108,18 @@ static int big_key_crypt(enum big_key_op op, struct big_key_buf *buf, size_t dat
 	 * an .update function, so there's no chance we'll wind up reusing the
 	 * key to encrypt updated data. Simply put: one key, one encryption.
 	 */
-	u8 zero_nonce[crypto_aead_ivsize(big_key_aead)];
+	u8 *zero_nonce;
 
-	aead_req = aead_request_alloc(big_key_aead, GFP_KERNEL);
-	if (!aead_req)
+	zero_nonce = kzalloc(crypto_aead_ivsize(big_key_aead), GFP_KERNEL);
+	if (!zero_nonce)
 		return -ENOMEM;
 
-	memset(zero_nonce, 0, sizeof(zero_nonce));
+	aead_req = aead_request_alloc(big_key_aead, GFP_KERNEL);
+	if (!aead_req) {
+		kfree(zero_nonce);
+		return -ENOMEM;
+	}
+
 	aead_request_set_crypt(aead_req, buf->sg, buf->sg, datalen, zero_nonce);
 	aead_request_set_callback(aead_req, CRYPTO_TFM_REQ_MAY_SLEEP, NULL, NULL);
 	aead_request_set_ad(aead_req, 0);
@@ -131,6 +136,7 @@ static int big_key_crypt(enum big_key_op op, struct big_key_buf *buf, size_t dat
 error:
 	mutex_unlock(&big_key_aead_lock);
 	aead_request_free(aead_req);
+	kzfree(zero_nonce);
 	return ret;
 }
 
