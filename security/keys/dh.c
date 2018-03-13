@@ -162,19 +162,27 @@ static int kdf_ctr(struct kdf_sdesc *sdesc, const u8 *src, unsigned int slen,
 			goto err;
 
 		if (zlen && h) {
-			u8 tmpbuffer[h];
+			u8 *tmpbuffer;
 			size_t chunk = min_t(size_t, zlen, h);
-			memset(tmpbuffer, 0, chunk);
+
+			err = -ENOMEM;
+			tmpbuffer = kzalloc(chunk, GFP_KERNEL);
+			if (!tmpbuffer)
+				goto err;
 
 			do {
 				err = crypto_shash_update(desc, tmpbuffer,
 							  chunk);
-				if (err)
+				if (err) {
+					kzfree(tmpbuffer);
 					goto err;
+				}
 
 				zlen -= chunk;
 				chunk = min_t(size_t, zlen, h);
 			} while (zlen);
+
+			kzfree(tmpbuffer);
 		}
 
 		if (src && slen) {
@@ -184,13 +192,20 @@ static int kdf_ctr(struct kdf_sdesc *sdesc, const u8 *src, unsigned int slen,
 		}
 
 		if (dlen < h) {
-			u8 tmpbuffer[h];
+			u8 *tmpbuffer;
+
+			err = -ENOMEM;
+			tmpbuffer = kzalloc(h, GFP_KERNEL);
+			if (!tmpbuffer)
+				goto err;
 
 			err = crypto_shash_final(desc, tmpbuffer);
-			if (err)
+			if (err) {
+				kzfree(tmpbuffer);
 				goto err;
+			}
 			memcpy(dst, tmpbuffer, dlen);
-			memzero_explicit(tmpbuffer, h);
+			kzfree(tmpbuffer);
 			return 0;
 		} else {
 			err = crypto_shash_final(desc, dst);
