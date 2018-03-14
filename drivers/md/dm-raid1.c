@@ -255,7 +255,7 @@ static int mirror_flush(struct dm_target *ti)
 	unsigned long error_bits;
 
 	unsigned int i;
-	struct dm_io_region io[ms->nr_mirrors];
+	struct dm_io_region *io;
 	struct mirror *m;
 	struct dm_io_request io_req = {
 		.bi_op = REQ_OP_WRITE,
@@ -265,6 +265,10 @@ static int mirror_flush(struct dm_target *ti)
 		.client = ms->io_client,
 	};
 
+	io = kmalloc_array(ms->nr_mirrors, sizeof(*io), GFP_KERNEL);
+	if (!io)
+		return -ENOMEM;
+
 	for (i = 0, m = ms->mirror; i < ms->nr_mirrors; i++, m++) {
 		io[i].bdev = m->dev->bdev;
 		io[i].sector = 0;
@@ -273,6 +277,7 @@ static int mirror_flush(struct dm_target *ti)
 
 	error_bits = -1;
 	dm_io(&io_req, ms->nr_mirrors, io, &error_bits);
+	kfree(io);
 	if (unlikely(error_bits != 0)) {
 		for (i = 0; i < ms->nr_mirrors; i++)
 			if (test_bit(i, &error_bits))
