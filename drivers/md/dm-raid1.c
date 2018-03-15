@@ -656,7 +656,7 @@ static void write_callback(unsigned long error, void *context)
 static void do_write(struct mirror_set *ms, struct bio *bio)
 {
 	unsigned int i;
-	struct dm_io_region io[ms->nr_mirrors], *dest = io;
+	struct dm_io_region io[DM_KCOPYD_MAX_REGIONS], *dest = io;
 	struct mirror *m;
 	struct dm_io_request io_req = {
 		.bi_op = REQ_OP_WRITE,
