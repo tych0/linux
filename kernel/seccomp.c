@@ -44,8 +44,8 @@
 
 enum notify_state {
 	SECCOMP_NOTIFY_INIT,
-	SECCOMP_NOTIFY_READ,
-	SECCOMP_NOTIFY_WRITE,
+	SECCOMP_NOTIFY_SENT,
+	SECCOMP_NOTIFY_REPLIED,
 };
 
 struct seccomp_knotif {
@@ -65,19 +65,26 @@ struct seccomp_knotif {
 	const struct seccomp_data *data;
 
 	/*
-	 * SECCOMP_NOTIFY_INIT: someone has made this request, but it has not
-	 * 	yet been sent to userspace
-	 * SECCOMP_NOTIFY_READ: sent to userspace but no response yet
-	 * SECCOMP_NOTIFY_WRITE: we have a response from userspace, but it has
-	 * 	not yet been written back to the application
+	 * Has this task been signalled while waiting for the userspace
+	 * handler?
+	 */
+	bool signalled;
+
+	/*
+	 * Notification states. When SECCOMP_RET_USER_NOTIF is returned, a
+	 * struct seccomp_knotif is created and starts out in INIT. Once the
+	 * handler reads the notification off of an FD, it transitions to READ.
+	 * If a signal is received the state transitions back to INIT and
+	 * another message is sent. When the userspace handler replies, state
+	 * transitions to REPLIED.
 	 */
 	enum notify_state state;
 
-	/* The return values, only valid when in SECCOMP_NOTIFY_WRITE */
+	/* The return values, only valid when in SECCOMP_NOTIFY_REPLIED */
 	int error;
 	long val;
 
-	/* Signals when this has entered SECCOMP_NOTIFY_WRITE */
+	/* Signals when this has entered SECCOMP_NOTIFY_REPLIED */
 	struct completion ready;
 
 	struct list_head list;
@@ -769,19 +776,28 @@ static void seccomp_do_user_notification(int this_syscall,
 	up(&match->request);
 
 	err = wait_for_completion_interruptible(&n.ready);
-	/*
-	 * This syscall is getting interrupted. We no longer need to
-	 * tell userspace about it, and any userspace responses should
-	 * be ignored.
-	 */
 	mutex_lock(&match->notify_lock);
-	if (err < 0)
-		goto remove_list;
+	if (err < 0) {
+		/*
+		 * We got a signal. Let's tell userspace about it (potentially
+		 * again, if we had already notified them about the first one).
+		 */
+		n.signalled = true;
+		if (n.state == SECCOMP_NOTIFY_SENT) {
+			n.state = SECCOMP_NOTIFY_INIT;
+			up(&match->request);
+		}
+		mutex_unlock(&match->notify_lock);
+		err = wait_for_completion_killable(&n.ready);
+		mutex_lock(&match->notify_lock);
+		if (err < 0)
+			goto remove_list;
+	}
 
 	ret = n.val;
 	err = n.error;
 
-	WARN(n.state != SECCOMP_NOTIFY_WRITE,
+	WARN(n.state != SECCOMP_NOTIFY_REPLIED,
 	     "notified about write complete when state is not write");
 
 remove_list:
@@ -1497,7 +1513,7 @@ static int seccomp_notify_release(struct inode *inode, struct file *file)
 
 		knotif = list_entry(cur, struct seccomp_knotif, list);
 
-		knotif->state = SECCOMP_NOTIFY_WRITE;
+		knotif->state = SECCOMP_NOTIFY_REPLIED;
 		knotif->error = -ENOSYS;
 		knotif->val = 0;
 		complete(&knotif->ready);
@@ -1515,7 +1531,7 @@ static ssize_t seccomp_notify_read(struct file *f, char __user *buf,
 	struct seccomp_filter *filter = f->private_data;
 	struct seccomp_knotif *knotif = NULL;
 	struct seccomp_notif unotif;
-	struct list_head *cur;
+	struct seccomp_knotif *cur;
 	ssize_t ret;
 
 	/* No offset reads. */
@@ -1527,19 +1543,16 @@ static ssize_t seccomp_notify_read(struct file *f, char __user *buf,
 		return ret;
 
 	mutex_lock(&filter->notify_lock);
-	list_for_each(cur, &filter->notifications) {
-		knotif = list_entry(cur, struct seccomp_knotif, list);
-		if (knotif->state == SECCOMP_NOTIFY_INIT)
+	list_for_each_entry(cur, &filter->notifications, list) {
+		if (cur->state == SECCOMP_NOTIFY_INIT) {
+			knotif = cur;
 			break;
+		}
 	}
 
-	/*
-	 * We didn't find anything which is odd, because at least one
-	 * thing should have been queued.
-	 */
-	if (knotif->state != SECCOMP_NOTIFY_INIT) {
+	if (unlikely(!knotif)) {
+		WARN(1, "no seccomp notification found; supurious wakeup?");
 		ret = -ENOENT;
-		WARN(1, "no seccomp notification found");
 		goto out;
 	}
 
@@ -1554,7 +1567,7 @@ static ssize_t seccomp_notify_read(struct file *f, char __user *buf,
 	}
 
 	ret = sizeof(unotif);
-	knotif->state = SECCOMP_NOTIFY_READ;
+	knotif->state = SECCOMP_NOTIFY_SENT;
 
 out:
 	mutex_unlock(&filter->notify_lock);
@@ -1595,7 +1608,7 @@ static ssize_t seccomp_notify_write(struct file *file, const char __user *buf,
 	}
 
 	ret = size;
-	knotif->state = SECCOMP_NOTIFY_WRITE;
+	knotif->state = SECCOMP_NOTIFY_REPLIED;
 	knotif->error = resp.error;
 	knotif->val = resp.val;
 	complete(&knotif->ready);
