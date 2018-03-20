@@ -1497,6 +1497,20 @@ device_initcall(seccomp_sysctl_init)
 #endif /* CONFIG_SYSCTL */
 
 #ifdef CONFIG_SECCOMP_USER_NOTIFICATION
+static size_t seccomp_nlmsg_notif_size(void)
+{
+	return NLMSG_ALIGN(sizeof(u64) +
+		sizeof(pid_t) +
+		sizeof(struct seccomp_data));
+}
+
+static size_t seccomp_nlmsg_notif_resp_size(void)
+{
+	return NLMSG_ALIGN(sizeof(u64) +
+		sizeof(int) +
+		sizeof(long));
+}
+
 static int seccomp_notify_release(struct inode *inode, struct file *file)
 {
 	struct seccomp_filter *filter = file->private_data;
@@ -1529,18 +1543,23 @@ static ssize_t seccomp_notify_read(struct file *f, char __user *buf,
 				   size_t size, loff_t *ppos)
 {
 	struct seccomp_filter *filter = f->private_data;
-	struct seccomp_knotif *knotif = NULL;
-	struct seccomp_notif unotif;
-	struct seccomp_knotif *cur;
+	struct seccomp_knotif *knotif = NULL, *cur;
+	struct seccomp_notif *unotif;
 	ssize_t ret;
+	struct sk_buff *nlb;
+	struct nlmsghdr *nlh;
 
 	/* No offset reads. */
 	if (*ppos != 0)
 		return -EINVAL;
 
+	nlb = nlmsg_new(NLMSG_ALIGN(sizeof(*unotif)), GFP_KERNEL);
+	if (!nlb)
+		return -ENOMEM;
+
 	ret = down_interruptible(&filter->request);
 	if (ret < 0)
-		return ret;
+		goto out_nlb;
 
 	mutex_lock(&filter->notify_lock);
 	list_for_each_entry(cur, &filter->notifications, list) {
@@ -1556,11 +1575,17 @@ static ssize_t seccomp_notify_read(struct file *f, char __user *buf,
 		goto out;
 	}
 
-	unotif.id = knotif->id;
-	unotif.pid = knotif->pid;
-	unotif.data = *(knotif->data);
+	ret = -EMSGSIZE;
+	nlh = nlmsg_put(nlb, 0, 0, 0, sizeof(unotif), 0);
+	if (!nlh)
+		goto out;
 
-	size = min_t(size_t, size, sizeof(struct seccomp_notif));
+	unotif = nlmsg_data(nlh);
+
+	unotif->id = knotif->id;
+	unotif->pid = knotif->pid;
+	unotif->data = *(knotif->pid);
+
 	if (copy_to_user(buf, &unotif, size)) {
 		ret = -EFAULT;
 		goto out;
@@ -1571,6 +1596,8 @@ static ssize_t seccomp_notify_read(struct file *f, char __user *buf,
 
 out:
 	mutex_unlock(&filter->notify_lock);
+out_nlb:
+	nlmsg_free(nlb);
 	return ret;
 }
 
@@ -1617,11 +1644,37 @@ out:
 	return ret;
 }
 
+static __poll_t seccomp_notify_poll(struct file *f, struct poll_table_struct *pts)
+{
+	struct seccomp_filter *filter = file->private_data;
+	return -EINVAL;
+}
+
 static const struct file_operations seccomp_notify_ops = {
 	.read = seccomp_notify_read,
 	.write = seccomp_notify_write,
-	/* TODO: poll */
+	.poll = seccomp_notify_poll,
 	.release = seccomp_notify_release,
+};
+
+static int seccomp_notify_sendmsg(struct socket *sock, struct msghdr *m,
+				  size_t total_len)
+{
+	
+}
+
+static int seccomp_notify_recvmsg(struct socket *sock, struct msghdr *m,
+				  size_t total_len, int flags)
+{
+	
+}
+
+static const struct proto_ops seccomp_notif_ops = {
+	.family = 
+	.owner = THIS_MODULE,
+	.release = seccomp_notify_release,
+	.sendmsg = seccomp_notify_sendmsg,
+	.recvmsg = seccomp_notify_recvmsg,
 };
 
 static struct file *init_listener(struct seccomp_filter *filter)
@@ -1634,7 +1687,6 @@ static struct file *init_listener(struct seccomp_filter *filter)
 	if (IS_ERR(ret)) {
 		__put_seccomp_filter(filter);
 		return ret;
-	} else {
 	}
 
 	/*

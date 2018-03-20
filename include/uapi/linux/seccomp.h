@@ -73,4 +73,22 @@ struct seccomp_notif_resp {
 	long val;
 };
 
+enum {
+	SCNF_ID,
+	SCNF_PID,
+	SCNF_SECCOMP_DATA,
+	__SCNF_MAX,
+};
+
+#define SCNF_MAX (__SCNF_MAX - 1)
+
+enum {
+	SCRSP_ID,
+	SCRSP_ERROR,
+	SCRSP_VAL,
+	__SCRSP_MAX,
+};
+
+#define SCRSP_MAX (__SCRSP_MAX - 1)
+
 #endif /* _UAPI_LINUX_SECCOMP_H */
