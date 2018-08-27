@@ -2,6 +2,7 @@
 #ifndef _UAPI_LINUX_SECCOMP_H
 #define _UAPI_LINUX_SECCOMP_H
 
+#include <linux/bits.h>
 #include <linux/compiler.h>
 #include <linux/types.h>
 
