@@ -11,6 +11,7 @@
 #include <linux/posix_types.h>
 
 struct file;
+struct task_struct;
 
 extern void fput(struct file *);
 
@@ -79,6 +80,8 @@ static inline void fdput_pos(struct fd f)
 
 extern int f_dupfd(unsigned int from, struct file *file, unsigned flags);
 extern int replace_fd(unsigned fd, struct file *file, unsigned flags);
+extern int __replace_fd_task(struct task_struct *task, unsigned fd,
+			     struct file *file, unsigned flags);
 extern void set_close_on_exec(unsigned int fd, int flag);
 extern bool get_close_on_exec(unsigned int fd);
 extern int get_unused_fd_flags(unsigned flags);

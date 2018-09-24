@@ -851,13 +851,24 @@ Ebusy:
 
 int replace_fd(unsigned fd, struct file *file, unsigned flags)
 {
+	return __replace_fd_task(current, fd, file, flags);
+}
+
+/*
+ * Warning! This is only safe if you know the owner of the files_struct is
+ * stopped outside syscall context. It's a very bad idea to use this unless you
+ * have similar guarantees in your code.
+ */
+int __replace_fd_task(struct task_struct *task, unsigned fd,
+		      struct file *file, unsigned flags)
+{
 	int err;
-	struct files_struct *files = current->files;
+	struct files_struct *files = task->files;
 
 	if (!file)
 		return __close_fd(files, fd);
 
-	if (fd >= rlimit(RLIMIT_NOFILE))
+	if (fd >= task_rlimit(task, RLIMIT_NOFILE))
 		return -EBADF;
 
 	spin_lock(&files->file_lock);
