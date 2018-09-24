@@ -851,23 +851,31 @@ Ebusy:
 
 int replace_fd(unsigned fd, struct file *file, unsigned flags)
 {
+	return replace_fd_task(current, fd, file, flags);
+}
+
+/*
+ * Same warning as __alloc_fd()/__fd_install() here.
+ */
+int replace_fd_task(struct task_struct *task, unsigned fd,
+		    struct file *file, unsigned flags)
+{
 	int err;
-	struct files_struct *files = current->files;
 
 	if (!file)
-		return __close_fd(files, fd);
+		return __close_fd(task->files, fd);
 
-	if (fd >= rlimit(RLIMIT_NOFILE))
+	if (fd >= task_rlimit(task, RLIMIT_NOFILE))
 		return -EBADF;
 
-	spin_lock(&files->file_lock);
-	err = expand_files(files, fd);
+	spin_lock(&task->files->file_lock);
+	err = expand_files(task->files, fd);
 	if (unlikely(err < 0))
 		goto out_unlock;
-	return do_dup2(files, file, fd, flags);
+	return do_dup2(task->files, file, fd, flags);
 
 out_unlock:
-	spin_unlock(&files->file_lock);
+	spin_unlock(&task->files->file_lock);
 	return err;
 }
 
