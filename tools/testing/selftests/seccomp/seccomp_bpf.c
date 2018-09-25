@@ -43,6 +43,7 @@
 #include <sys/times.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
+#include <linux/kcmp.h>
 
 #include <unistd.h>
 #include <sys/syscall.h>
@@ -173,6 +174,8 @@ struct seccomp_metadata {
 #define SECCOMP_IOCTL_NOTIF_SEND	SECCOMP_IOWR(1,	\
 						struct seccomp_notif_resp)
 #define SECCOMP_IOCTL_NOTIF_ID_VALID	SECCOMP_IOR(2, __u64)
+#define SECCOMP_IOCTL_NOTIF_PUT_FD	SECCOMP_IOR(3, \
+						struct seccomp_notif_put_fd)
 
 struct seccomp_notif {
 	__u16 len;
@@ -188,6 +191,13 @@ struct seccomp_notif_resp {
 	__s32 error;
 	__s64 val;
 };
+
+struct seccomp_notif_put_fd {
+	__u64 id;
+	__s32 fd;
+	__u32 fd_flags;
+	__s32 to_replace;
+};
 #endif
 
 #ifndef seccomp
@@ -195,6 +205,14 @@ int seccomp(unsigned int op, unsigned int flags, void *args)
 {
 	errno = 0;
 	return syscall(__NR_seccomp, op, flags, args);
+}
+#endif
+
+#ifndef kcmp
+int kcmp(pid_t pid1, pid_t pid2, int type, unsigned long idx1,
+	 unsigned long idx2)
+{
+	return syscall(__NR_kcmp, pid1, pid2, type, idx1, idx2);
 }
 #endif
 
@@ -3246,6 +3264,113 @@ TEST(get_user_notification_ptrace)
 	EXPECT_EQ(true, WIFEXITED(status));
 	EXPECT_EQ(0, WEXITSTATUS(status));
 
+	close(listener);
+}
+
+TEST(user_notification_pass_fd)
+{
+	pid_t pid;
+	int status, listener, fd;
+	int sk_pair[2];
+	char c;
+	struct seccomp_notif req = {};
+	struct seccomp_notif_resp resp = {};
+	struct seccomp_notif_put_fd putfd = {};
+	long ret;
+
+	ASSERT_EQ(socketpair(PF_LOCAL, SOCK_SEQPACKET, 0, sk_pair), 0);
+
+	pid = fork();
+	ASSERT_GE(pid, 0);
+
+	if (pid == 0) {
+		int fd;
+		char buf[16];
+
+		EXPECT_EQ(user_trap_syscall(__NR_getpid, 0), 0);
+
+		/* Signal we're ready and have installed the filter. */
+		EXPECT_EQ(write(sk_pair[1], "J", 1), 1);
+
+		EXPECT_EQ(read(sk_pair[1], &c, 1), 1);
+		EXPECT_EQ(c, 'H');
+		close(sk_pair[1]);
+
+		/* An fd from getpid(). Let the games begin. */
+		fd = syscall(__NR_getpid);
+		EXPECT_GT(fd, 0);
+		EXPECT_EQ(read(fd, buf, sizeof(buf)), 12);
+		close(fd);
+
+		exit(strcmp("hello world", buf));
+	}
+
+	EXPECT_EQ(read(sk_pair[0], &c, 1), 1);
+	EXPECT_EQ(c, 'J');
+
+	EXPECT_EQ(ptrace(PTRACE_ATTACH, pid), 0);
+	EXPECT_EQ(waitpid(pid, NULL, 0), pid);
+	listener = ptrace(PTRACE_SECCOMP_NEW_LISTENER, pid, 0, 0);
+	EXPECT_GE(listener, 0);
+	EXPECT_EQ(ptrace(PTRACE_DETACH, pid, NULL, 0), 0);
+
+	/* Now signal we are done installing so it can do a getpid */
+	EXPECT_EQ(write(sk_pair[0], "H", 1), 1);
+	close(sk_pair[0]);
+
+	/* Make a new socket pair so we can send half across */
+	EXPECT_EQ(socketpair(PF_LOCAL, SOCK_SEQPACKET, 0, sk_pair), 0);
+
+	ret = read_notif(listener, &req);
+	EXPECT_EQ(ret, sizeof(req));
+	EXPECT_EQ(errno, 0);
+
+	resp.len = sizeof(resp);
+	resp.id = req.id;
+
+	putfd.id = req.id;
+	putfd.fd_flags = 0;
+
+	/* First, let's just create a new fd with our stdout. */
+	putfd.fd = 0;
+	putfd.to_replace = -1;
+	fd = ioctl(listener, SECCOMP_IOCTL_NOTIF_PUT_FD, &putfd);
+	EXPECT_GE(fd, 0);
+	EXPECT_EQ(kcmp(req.pid, getpid(), KCMP_FILE, fd, 0), 0);
+
+	/* Dup something else over the top of it. */
+	putfd.fd = sk_pair[1];
+	putfd.to_replace = fd;
+	fd = ioctl(listener, SECCOMP_IOCTL_NOTIF_PUT_FD, &putfd);
+	EXPECT_GE(fd, 0);
+	EXPECT_EQ(kcmp(req.pid, getpid(), KCMP_FILE, fd, sk_pair[1]), 0);
+
+	/* Now, try to close it. */
+	putfd.fd = -1;
+	putfd.to_replace = fd;
+	fd = ioctl(listener, SECCOMP_IOCTL_NOTIF_PUT_FD, &putfd);
+	EXPECT_GE(fd, 0);
+	EXPECT_NE(kcmp(req.pid, getpid(), KCMP_FILE, fd, sk_pair[1]), 0);
+
+	/* Ok, we tried the three cases, now let's do what we really want. */
+	putfd.fd = sk_pair[1];
+	putfd.to_replace = -1;
+	fd = ioctl(listener, SECCOMP_IOCTL_NOTIF_PUT_FD, &putfd);
+	EXPECT_GE(fd, 0);
+	EXPECT_EQ(kcmp(req.pid, getpid(), KCMP_FILE, fd, sk_pair[1]), 0);
+
+	resp.val = fd;
+	resp.error = 0;
+
+	EXPECT_EQ(ioctl(listener, SECCOMP_IOCTL_NOTIF_SEND, &resp), sizeof(resp));
+	close(sk_pair[1]);
+
+	EXPECT_EQ(write(sk_pair[0], "hello world\0", 12), 12);
+	close(sk_pair[0]);
+
+	EXPECT_EQ(waitpid(pid, &status, 0), pid);
+	EXPECT_EQ(true, WIFEXITED(status));
+	EXPECT_EQ(0, WEXITSTATUS(status));
 	close(listener);
 }
 

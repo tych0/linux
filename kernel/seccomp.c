@@ -41,6 +41,8 @@
 #include <linux/tracehook.h>
 #include <linux/uaccess.h>
 #include <linux/anon_inodes.h>
+#include <linux/fdtable.h>
+#include <net/cls_cgroup.h>
 
 enum notify_state {
 	SECCOMP_NOTIFY_INIT,
@@ -1164,6 +1166,62 @@ out:
 	return ret;
 }
 
+static long seccomp_notify_put_fd(struct seccomp_filter *filter,
+				  void __user *buf)
+{
+	struct seccomp_notif_put_fd req;
+	struct seccomp_knotif *knotif = NULL;
+	long ret;
+
+	if (copy_from_user(&req, buf, sizeof(req)))
+		return -EFAULT;
+
+	if (req.fd < 0 && req.to_replace < 0)
+		return -EINVAL;
+
+	ret = mutex_lock_interruptible(&filter->notify_lock);
+	if (ret < 0)
+		return ret;
+
+	ret = -ENOENT;
+	list_for_each_entry(knotif, &filter->notif->notifications, list) {
+		struct file *file = NULL;
+
+		if (knotif->id != req.id)
+			continue;
+
+		if (req.fd >= 0) {
+			ret = -EBADF;
+			file = fget(req.fd);
+			if (!file)
+				break;
+		}
+
+		if (req.to_replace >= 0) {
+			ret = __replace_fd_task(knotif->task, req.to_replace,
+						file, req.fd_flags);
+		} else {
+			unsigned long max_files;
+
+			max_files = task_rlimit(knotif->task, RLIMIT_NOFILE);
+			ret = __alloc_fd(knotif->task->files, 0, max_files,
+					 req.fd_flags);
+			if (ret >= 0) {
+				__fd_install(knotif->task->files, ret, file);
+				break;
+			}
+		}
+
+		if (file != NULL)
+			fput(file);
+
+		break;
+	}
+
+	mutex_unlock(&filter->notify_lock);
+	return ret;
+}
+
 static long seccomp_notify_ioctl(struct file *file, unsigned int cmd,
 				 unsigned long arg)
 {
@@ -1177,6 +1235,8 @@ static long seccomp_notify_ioctl(struct file *file, unsigned int cmd,
 		return seccomp_notify_send(filter, buf);
 	case SECCOMP_IOCTL_NOTIF_ID_VALID:
 		return seccomp_notify_id_valid(filter, buf);
+	case SECCOMP_IOCTL_NOTIF_PUT_FD:
+		return seccomp_notify_put_fd(filter, buf);
 	default:
 		return -EINVAL;
 	}

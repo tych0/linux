@@ -237,6 +237,13 @@ The interface for a seccomp notification fd consists of two structures:
         __s64 val;
     };
 
+    struct seccomp_notif_put_fd {
+        __u64 id;
+        __s32 fd;
+        __u32 fd_flags;
+        __s32 to_replace;
+    };
+
 Users can read via ``ioctl(SECCOMP_IOCTL_NOTIF_RECV)``  (or ``poll()``) on a
 seccomp notification fd to receive a ``struct seccomp_notif``, which contains
 five members: the input length of the structure, a unique-per-filter ``id``,
@@ -256,6 +263,15 @@ memory is accessible to suitably privileged traces via ``ptrace()`` or
 above in this document: all arguments being read from the tracee's memory
 should be read into the tracer's memory before any policy decisions are made.
 This allows for an atomic decision on syscall arguments.
+
+Userspace can also insert (or overwrite) file descriptors of the tracee using
+``ioctl(SECCOMP_IOCTL_NOTIF_PUT_FD)``. The ``id`` member is the request/pid to
+insert the fd into. The ``fd`` is the fd in the listener's table to send or
+``-1`` if an fd should be closed instead. The ``to_replace`` fd is the fd in
+the tracee's table that should be overwritten, or ``-1`` if a new fd is
+installed. ``fd_flags`` should be the flags that the fd in the tracee's table
+is opened with (e.g. ``O_CLOEXEC`` or similar). The return value from this
+ioctl is the fd number that was installed.
 
 Sysctls
 =======
