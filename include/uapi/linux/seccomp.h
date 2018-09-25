@@ -77,6 +77,13 @@ struct seccomp_notif_resp {
 	__s64 val;
 };
 
+struct seccomp_notif_put_fd {
+	__u64 id;
+	__s32 fd;
+	__u32 fd_flags;
+	__s32 to_replace;
+};
+
 #define SECCOMP_IOC_MAGIC		0xF7
 
 /* Flags for seccomp notification fd ioctl. */
@@ -86,5 +93,7 @@ struct seccomp_notif_resp {
 					struct seccomp_notif_resp)
 #define SECCOMP_NOTIF_ID_VALID	_IOR(SECCOMP_IOC_MAGIC, 2,	\
 					__u64)
+#define SECCOMP_NOTIF_PUT_FD	_IOR(SECCOMP_IOC_MAGIC, 3,	\
+					struct seccomp_notif_put_fd)
 
 #endif /* _UAPI_LINUX_SECCOMP_H */
