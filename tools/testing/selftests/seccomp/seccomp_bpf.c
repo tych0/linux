@@ -3271,7 +3271,7 @@ TEST(user_notification_child_pid_ns)
 	struct seccomp_notif req = {};
 	struct seccomp_notif_resp resp = {};
 
-	ASSERT_EQ(unshare(CLONE_NEWPID), 0);
+	ASSERT_EQ(unshare(CLONE_NEWUSER | CLONE_NEWPID), 0);
 
 	listener = user_trap_syscall(__NR_getpid, SECCOMP_FILTER_FLAG_NEW_LISTENER);
 	ASSERT_GE(listener, 0);
@@ -3307,6 +3307,8 @@ TEST(user_notification_sibling_pid_ns)
 	int status, listener;
 	struct seccomp_notif req = {};
 	struct seccomp_notif_resp resp = {};
+
+	ASSERT_EQ(unshare(CLONE_NEWUSER), 0);
 
 	listener = user_trap_syscall(__NR_getpid, SECCOMP_FILTER_FLAG_NEW_LISTENER);
 	ASSERT_GE(listener, 0);
