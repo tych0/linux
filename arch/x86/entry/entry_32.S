@@ -1507,6 +1507,6 @@ ENTRY(rewind_stack_do_exit)
 	movl	PER_CPU_VAR(cpu_current_top_of_stack), %esi
 	leal	-TOP_OF_KERNEL_STACK_PADDING-PTREGS_SIZE(%esi), %esp
 
-	call	do_exit
+	call	__finish_rewind_stack_do_exit
 1:	jmp 1b
 END(rewind_stack_do_exit)

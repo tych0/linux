@@ -427,3 +427,13 @@ __visible long do_fast_syscall_32(struct pt_regs *regs)
 #endif
 }
 #endif
+
+void __noreturn __finish_rewind_stack_do_exit(long code)
+{
+	/*
+	 * If we oopsed in an interrupt handler, interrupts may be off. Let's turn
+	 * them back on before going back to "normal" code.
+	 */
+	 local_irq_enable();
+	 do_exit(code);
+}

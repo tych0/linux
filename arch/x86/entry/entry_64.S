@@ -1672,5 +1672,6 @@ ENTRY(rewind_stack_do_exit)
 	leaq	-PTREGS_SIZE(%rax), %rsp
 	UNWIND_HINT_FUNC sp_offset=PTREGS_SIZE
 
-	call	do_exit
+	call	__finish_rewind_stack_do_exit
+1:	jmp 1b
 END(rewind_stack_do_exit)
