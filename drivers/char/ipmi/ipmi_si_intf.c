@@ -1537,8 +1537,6 @@ static int port_setup(struct smi_info *info)
 	if (!addr)
 		return -ENODEV;
 
-	info->io_cleanup = port_cleanup;
-
 	/*
 	 * Figure out the actual inb/inw/inl/etc routine to use based
 	 * upon the register size.
@@ -1578,6 +1576,9 @@ static int port_setup(struct smi_info *info)
 			return -EIO;
 		}
 	}
+
+	info->io_cleanup = port_cleanup;
+
 	return 0;
 }
 
@@ -3733,6 +3734,11 @@ out_err:
 	} else if (new_smi->pdev) {
 		platform_device_put(new_smi->pdev);
 		new_smi->pdev = NULL;
+	}
+
+	if (rv && new_smi->io.io_cleanup) {
+		new_smi->io.io_cleanup(&new_smi->io);
+		new_smi->io.io_cleanup = NULL;
 	}
 
 	kfree(init_name);
