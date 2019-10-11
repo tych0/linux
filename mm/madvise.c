@@ -69,7 +69,7 @@ static long madvise_behavior(struct vm_area_struct *vma,
 		     unsigned long start, unsigned long end, int behavior)
 {
 	struct mm_struct *mm = vma->vm_mm;
-	int error = 0;
+	int error = 0, madv_secret = 0;
 	pgoff_t pgoff;
 	unsigned long new_flags = vma->vm_flags;
 
@@ -127,16 +127,29 @@ static long madvise_behavior(struct vm_area_struct *vma,
 			goto out_convert_errno;
 		break;
 	case MADV_SECRET:
+		printk("MADV_SECRET::%d\n", behavior);
+		printk("vma::");
+		dump_vma(vma);
+		printk("previous::");
+		if (*prev)
+	 		dump_vma(*prev);
+		printk("new_flags before::%d\n", new_flags);
+		madv_secret = 1;
 		new_flags |= VM_DONTCOPY;
 		new_flags |= VM_WIPEONFORK;
 		new_flags |= VM_DONTDUMP;
 		new_flags |= VM_UNCACHED;
+		printk("new_flags after::%d\n", new_flags);
 		break;
 	case MADV_NONSECRET:
+		printk("MADV_NONSECRET::%d\n", behavior);
+		madv_secret = 1;
+		printk("new_flags before::%d\n", new_flags);
 		new_flags &= ~VM_DONTCOPY;
 		new_flags &= ~VM_WIPEONFORK;
 		new_flags &= ~VM_DONTDUMP;
 		new_flags &= ~VM_UNCACHED;
+		printk("new_flags after::%d\n", new_flags);
 		/* do we assume here that userspace cleaned up the
 		 * secrets or should we zero out the page anyway? */
 		break;
@@ -149,6 +162,10 @@ static long madvise_behavior(struct vm_area_struct *vma,
 	}
 
 	pgoff = vma->vm_pgoff + ((start - vma->vm_start) >> PAGE_SHIFT);
+	if (madv_secret == 1){
+		printk("pgoff::%lx\n", pgoff);
+		printk("vma->vm_pgoff::%lx\n", vma->vm_pgoff);
+	}
 	*prev = vma_merge(mm, *prev, start, end, new_flags, vma->anon_vma,
 			  vma->vm_file, pgoff, vma_policy(vma),
 			  vma->vm_userfaultfd_ctx);
@@ -158,6 +175,10 @@ static long madvise_behavior(struct vm_area_struct *vma,
 	}
 
 	*prev = vma;
+	if (madv_secret == 1){
+		printk("start::%lx\n", start);
+		printk("end::%lx\n", end);
+	}
 
 	if (start != vma->vm_start) {
 		if (unlikely(mm->map_count >= sysctl_max_map_count)) {
@@ -184,6 +205,10 @@ success:
 	 * vm_flags is protected by the mmap_sem held in write mode.
 	 */
 	vma->vm_flags = new_flags;
+	if (madv_secret == 1){
+		printk("new vma::");
+		dump_vma(vma);
+	}
 
 out_convert_errno:
 	/*

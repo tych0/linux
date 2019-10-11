@@ -25,7 +25,7 @@
  * processors that support doing this.
  */
 #define arch_cache_pgprot_val(vm_flags)	\
-		((vm_flags) & VM_UNCACHED ? pgprot_val(pgprot_noncached(__pgprot(0))) : 0)
+		((vm_flags) & VM_UNCACHED ? cachemode2protval(_PAGE_CACHE_MODE_UC) : 0)
 
 #define arch_vm_get_page_prot(vm_flags)	__pgprot(	\
 		arch_pkey_pgprot_val(vm_flags) | 	\
