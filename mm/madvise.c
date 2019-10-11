@@ -51,6 +51,8 @@ static int madvise_need_mmap_write(int behavior)
 	case MADV_COLD:
 	case MADV_PAGEOUT:
 	case MADV_FREE:
+	case MADV_SECRET:
+	case MADV_NONSECRET:
 		return 0;
 	default:
 		/* be safe, default to 1. list exceptions explicitly */
@@ -124,7 +126,22 @@ static long madvise_behavior(struct vm_area_struct *vma,
 		if (error)
 			goto out_convert_errno;
 		break;
+	case MADV_SECRET:
+		new_flags |= VM_DONTCOPY;
+		new_flags |= VM_WIPEONFORK;
+		new_flags |= VM_DONTDUMP;
+		new_flags |= VM_UNCACHED;
+		break;
+	case MADV_NONSECRET:
+		new_flags &= ~VM_DONTCOPY;
+		new_flags &= ~VM_WIPEONFORK;
+		new_flags &= ~VM_DONTDUMP;
+		new_flags &= ~VM_UNCACHED;
+		/* do we assume here that userspace cleaned up the
+		 * secrets or should we zero out the page anyway? */
+		break;
 	}
+
 
 	if (new_flags == vma->vm_flags) {
 		*prev = vma;
@@ -968,6 +985,8 @@ madvise_behavior_valid(int behavior)
 	case MADV_SOFT_OFFLINE:
 	case MADV_HWPOISON:
 #endif
+	case MADV_SECRET:
+	case MADV_NONSECRET:
 		return true;
 
 	default:
