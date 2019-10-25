@@ -28,8 +28,9 @@
 		((vm_flags) & VM_UNCACHED ? cachemode2protval(_PAGE_CACHE_MODE_UC) : 0)
 
 #define arch_vm_get_page_prot(vm_flags)	__pgprot(	\
-		arch_pkey_pgprot_val(vm_flags) | 	\
-		arch_cache_pgprot_val(vm_flags))
+		((vm_flags) & VM_NODIRECT ? 0 : \
+			arch_pkey_pgprot_val(vm_flags) | 	\
+			arch_cache_pgprot_val(vm_flags)))
 
 #define arch_calc_vm_prot_bits(prot, key) (		\
 		((key) & 0x1 ? VM_PKEY_BIT0 : 0) |      \

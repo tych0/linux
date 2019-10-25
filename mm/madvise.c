@@ -139,6 +139,7 @@ static long madvise_behavior(struct vm_area_struct *vma,
 		new_flags |= VM_WIPEONFORK;
 		new_flags |= VM_DONTDUMP;
 		new_flags |= VM_UNCACHED;
+		new_flags |= VM_NODIRECT;
 		printk("new_flags after::%d\n", new_flags);
 		break;
 	case MADV_NONSECRET:
@@ -149,6 +150,7 @@ static long madvise_behavior(struct vm_area_struct *vma,
 		new_flags &= ~VM_WIPEONFORK;
 		new_flags &= ~VM_DONTDUMP;
 		new_flags &= ~VM_UNCACHED;
+		new_flags &= ~VM_NODIRECT;
 		printk("new_flags after::%d\n", new_flags);
 		/* do we assume here that userspace cleaned up the
 		 * secrets or should we zero out the page anyway? */
