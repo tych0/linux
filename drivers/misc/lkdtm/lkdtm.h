@@ -99,4 +99,7 @@ void lkdtm_STACKLEAK_ERASING(void);
 /* cfi.c */
 void lkdtm_CFI_FORWARD_PROTO(void);
 
+/* madvise_secret.c */
+void lkdtm_MADV_SECRET(void);
+
 #endif
