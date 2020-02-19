@@ -568,6 +568,11 @@ int call_usermodehelper_exec(struct subprocess_info *sub_info, int wait)
 	if (strlen(sub_info->path) == 0)
 		goto out;
 
+#ifdef CONFIG_STATIC_USERMODEHELPER
+	if (sub_info->argv && !strlen(sub_info->argv[0]))
+		goto out;
+#endif
+
 	/*
 	 * Set the completion pointer only if there is a waiter.
 	 * This makes it possible to use umh_complete to free
