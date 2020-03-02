@@ -3705,8 +3705,10 @@ static vm_fault_t do_cow_fault(struct vm_fault *vmf)
 	if (ret & VM_FAULT_DONE_COW)
 		return ret;
 
-	copy_user_highpage(vmf->cow_page, vmf->page, vmf->address, vma);
-	__SetPageUptodate(vmf->cow_page);
+	if (!(ret & VM_FAULT_EXCLUSIVE)) {
+		copy_user_highpage(vmf->cow_page, vmf->page, vmf->address, vma);
+		__SetPageUptodate(vmf->cow_page);
+	}
 
 	ret |= finish_fault(vmf);
 	unlock_page(vmf->page);

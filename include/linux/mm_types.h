@@ -694,6 +694,7 @@ enum vm_fault_reason {
 	VM_FAULT_DONE_COW       = (__force vm_fault_t)0x001000,
 	VM_FAULT_NEEDDSYNC      = (__force vm_fault_t)0x002000,
 	VM_FAULT_HINDEX_MASK    = (__force vm_fault_t)0x0f0000,
+	VM_FAULT_EXCLUSIVE	= (__force vm_fault_t)0x100000,
 };
 
 /* Encode hstate index for a hwpoisoned large page */
