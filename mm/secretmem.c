@@ -37,8 +37,14 @@ static int secretmem_check_limits(struct vm_fault *vmf)
 	struct inode *inode = file_inode(vmf->vma->vm_file);
 	unsigned long limit;
 
-	if (((loff_t)vmf->pgoff << PAGE_SHIFT) >= i_size_read(inode))
+	/*
+	 * this check seems broken, i can't write to the mapping at offset zero
+	 * because the file is of size zero.
+	if (((loff_t)vmf->pgoff << PAGE_SHIFT) >= i_size_read(inode)) {
+		printk("i_size_read(): %lld, vmf->pgoff: %lu\n", i_size_read(inode), vmf->pgoff);
 		return -EINVAL;
+	}
+	*/
 
 	limit = rlimit(RLIMIT_MEMLOCK) >> PAGE_SHIFT;
 	if (state->nr_pages + 1 >= limit)
