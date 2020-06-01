@@ -14,6 +14,7 @@ TARGETS += exec
 TARGETS += filesystems
 TARGETS += filesystems/binderfs
 TARGETS += filesystems/epoll
+TARGETS += filesystems/ociv2fs
 TARGETS += firmware
 TARGETS += ftrace
 TARGETS += futex

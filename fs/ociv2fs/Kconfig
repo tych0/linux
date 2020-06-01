@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config OCIV2FS
+	bool "OCIv2 mounting support"
+	help
+	  Say Y here if you would like to mount OCIv2 images as a filesystem.
+
+	  If unsure, say N.
+
+config CBOR_TEST
+	tristate "Run CBOR self tests"
+	help
+	  The cbor test suite
+
+	  If unsure, say N.
