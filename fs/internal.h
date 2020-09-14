@@ -88,6 +88,7 @@ struct mount_kattr {
 	unsigned int propagation;
 	unsigned int lookup_flags;
 	bool recurse;
+	struct user_namespace *userns;
 };
 extern void *copy_mount_options(const void __user *);
 extern char *copy_mount_string(const void __user *);
