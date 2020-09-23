@@ -242,7 +242,8 @@ EXPORT_SYMBOL(setattr_copy);
  * the file open for write, as there can be no conflicting delegation in
  * that case.
  */
-int notify_change(struct dentry * dentry, struct iattr * attr, struct inode **delegated_inode)
+int ns_notify_change(struct user_namespace *user_ns, struct dentry *dentry,
+		     struct iattr *attr, struct inode **delegated_inode)
 {
 	struct inode *inode = dentry->d_inode;
 	umode_t mode = inode->i_mode;
@@ -265,8 +266,8 @@ int notify_change(struct dentry * dentry, struct iattr * attr, struct inode **de
 		if (IS_IMMUTABLE(inode))
 			return -EPERM;
 
-		if (!inode_owner_or_capable(inode)) {
-			error = inode_permission(inode, MAY_WRITE);
+		if (!ns_inode_owner_or_capable(user_ns, inode)) {
+			error = ns_inode_permission(user_ns, inode, MAY_WRITE);
 			if (error)
 				return error;
 		}
@@ -366,5 +367,12 @@ int notify_change(struct dentry * dentry, struct iattr * attr, struct inode **de
 	}
 
 	return error;
+}
+EXPORT_SYMBOL(ns_notify_change);
+
+int notify_change(struct dentry *dentry, struct iattr *attr,
+		  struct inode **delegated_inode)
+{
+	return ns_notify_change(&init_user_ns, dentry, attr, delegated_inode);
 }
 EXPORT_SYMBOL(notify_change);

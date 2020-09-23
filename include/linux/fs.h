@@ -2847,6 +2847,8 @@ static inline int bmap(struct inode *inode,  sector_t *block)
 #endif
 
 extern int notify_change(struct dentry *, struct iattr *, struct inode **);
+extern int ns_notify_change(struct user_namespace *, struct dentry *,
+			    struct iattr *, struct inode **);
 extern int inode_permission(struct inode *, int);
 extern int ns_inode_permission(struct user_namespace *, struct inode *, int);
 extern int generic_permission(struct inode *, int);
