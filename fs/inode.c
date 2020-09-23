@@ -2153,6 +2153,22 @@ void inode_init_owner(struct inode *inode, const struct inode *dir,
 }
 EXPORT_SYMBOL(inode_init_owner);
 
+bool ns_inode_owner_or_capable(struct user_namespace *user_ns, const struct inode *inode)
+{
+	kuid_t i_uid;
+	struct user_namespace *ns;
+
+	i_uid = i_uid_into(user_ns, inode);
+	if (uid_eq(current_fsuid(), i_uid))
+		return true;
+
+	ns = current_user_ns();
+	if (kuid_has_mapping(ns, i_uid) && ns_capable(ns, CAP_FOWNER))
+		return true;
+	return false;
+}
+EXPORT_SYMBOL(ns_inode_owner_or_capable);
+
 /**
  * inode_owner_or_capable - check current task permissions to inode
  * @inode: inode being checked
@@ -2162,15 +2178,7 @@ EXPORT_SYMBOL(inode_init_owner);
  */
 bool inode_owner_or_capable(const struct inode *inode)
 {
-	struct user_namespace *ns;
-
-	if (uid_eq(current_fsuid(), inode->i_uid))
-		return true;
-
-	ns = current_user_ns();
-	if (kuid_has_mapping(ns, inode->i_uid) && ns_capable(ns, CAP_FOWNER))
-		return true;
-	return false;
+	return ns_inode_owner_or_capable(&init_user_ns, inode);
 }
 EXPORT_SYMBOL(inode_owner_or_capable);
 

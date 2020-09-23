@@ -1772,6 +1772,8 @@ static inline int sb_start_intwrite_trylock(struct super_block *sb)
 
 
 extern bool inode_owner_or_capable(const struct inode *inode);
+extern bool ns_inode_owner_or_capable(struct user_namespace *ns,
+				      const struct inode *inode);
 
 /*
  * VFS helper functions..
