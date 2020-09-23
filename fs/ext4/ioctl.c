@@ -826,8 +826,10 @@ long ext4_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		return put_user(flags, (int __user *) arg);
 	case FS_IOC_SETFLAGS: {
 		int err;
+		struct user_namespace *user_ns;
 
-		if (!inode_owner_or_capable(inode))
+		user_ns = mnt_user_ns(filp->f_path.mnt);
+		if (!ns_inode_owner_or_capable(user_ns, inode))
 			return -EACCES;
 
 		if (get_user(flags, (int __user *) arg))
