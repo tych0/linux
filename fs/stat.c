@@ -40,7 +40,9 @@ void generic_fillattr(struct inode *inode, struct kstat *stat)
 	stat->mode = inode->i_mode;
 	stat->nlink = inode->i_nlink;
 	stat->uid = inode->i_uid;
+	stat->uid_translated = -1;
 	stat->gid = inode->i_gid;
+	stat->gid_translated = -1;
 	stat->rdev = inode->i_rdev;
 	stat->size = i_size_read(inode);
 	stat->atime = inode->i_atime;
@@ -50,6 +52,17 @@ void generic_fillattr(struct inode *inode, struct kstat *stat)
 	stat->blocks = inode->i_blocks;
 }
 EXPORT_SYMBOL(generic_fillattr);
+
+void ns_generic_fillattr(struct user_namespace *user_ns, struct inode *inode,
+			 struct kstat *stat)
+{
+	generic_fillattr(inode, stat);
+	stat->uid = INVALID_UID;
+	stat->gid = INVALID_GID;
+	stat->uid_translated = from_kuid_munged(current_user_ns(), i_uid_into(user_ns, inode));
+	stat->gid_translated = from_kgid_munged(current_user_ns(), i_gid_into(user_ns, inode));
+}
+EXPORT_SYMBOL(ns_generic_fillattr);
 
 /**
  * vfs_getattr_nosec - getattr without security checks
@@ -249,8 +262,14 @@ static int cp_old_stat(struct kstat *stat, struct __old_kernel_stat __user * sta
 	tmp.st_nlink = stat->nlink;
 	if (tmp.st_nlink != stat->nlink)
 		return -EOVERFLOW;
-	SET_UID(tmp.st_uid, from_kuid_munged(current_user_ns(), stat->uid));
-	SET_GID(tmp.st_gid, from_kgid_munged(current_user_ns(), stat->gid));
+	if (uid_valid(stat->uid))
+		SET_UID(tmp.st_uid, from_kuid_munged(current_user_ns(), stat->uid));
+	else
+		SET_UID(tmp.st_uid, stat->uid_translated);
+	if (gid_valid(stat->gid))
+		SET_GID(tmp.st_gid, from_kgid_munged(current_user_ns(), stat->gid));
+	else
+		SET_GID(tmp.st_gid, stat->gid_translated);
 	tmp.st_rdev = old_encode_dev(stat->rdev);
 #if BITS_PER_LONG == 32
 	if (stat->size > MAX_NON_LFS)
@@ -337,8 +356,14 @@ static int cp_new_stat(struct kstat *stat, struct stat __user *statbuf)
 	tmp.st_nlink = stat->nlink;
 	if (tmp.st_nlink != stat->nlink)
 		return -EOVERFLOW;
-	SET_UID(tmp.st_uid, from_kuid_munged(current_user_ns(), stat->uid));
-	SET_GID(tmp.st_gid, from_kgid_munged(current_user_ns(), stat->gid));
+	if (uid_valid(stat->uid))
+		SET_UID(tmp.st_uid, from_kuid_munged(current_user_ns(), stat->uid));
+	else
+		SET_UID(tmp.st_uid, stat->uid_translated);
+	if (gid_valid(stat->gid))
+		SET_GID(tmp.st_gid, from_kgid_munged(current_user_ns(), stat->gid));
+	else
+		SET_GID(tmp.st_gid, stat->gid_translated);
 	tmp.st_rdev = encode_dev(stat->rdev);
 	tmp.st_size = stat->size;
 	tmp.st_atime = stat->atime.tv_sec;
@@ -481,8 +506,14 @@ static long cp_new_stat64(struct kstat *stat, struct stat64 __user *statbuf)
 #endif
 	tmp.st_mode = stat->mode;
 	tmp.st_nlink = stat->nlink;
-	tmp.st_uid = from_kuid_munged(current_user_ns(), stat->uid);
-	tmp.st_gid = from_kgid_munged(current_user_ns(), stat->gid);
+	if (uid_valid(stat->uid))
+		tmp.st_uid = from_kuid_munged(current_user_ns(), stat->uid);
+	else
+		tmp.st_uid = stat->uid_translated;
+	if (gid_valid(stat->gid))
+		tmp.st_gid = from_kgid_munged(current_user_ns(), stat->gid);
+	else
+		tmp.st_gid = stat->gid_translated;
 	tmp.st_atime = stat->atime.tv_sec;
 	tmp.st_atime_nsec = stat->atime.tv_nsec;
 	tmp.st_mtime = stat->mtime.tv_sec;
@@ -554,8 +585,14 @@ cp_statx(const struct kstat *stat, struct statx __user *buffer)
 	tmp.stx_blksize = stat->blksize;
 	tmp.stx_attributes = stat->attributes;
 	tmp.stx_nlink = stat->nlink;
-	tmp.stx_uid = from_kuid_munged(current_user_ns(), stat->uid);
-	tmp.stx_gid = from_kgid_munged(current_user_ns(), stat->gid);
+	if (uid_valid(stat->uid))
+		tmp.stx_uid = from_kuid_munged(current_user_ns(), stat->uid);
+	else
+		tmp.stx_uid = stat->uid_translated;
+	if (gid_valid(stat->gid))
+		tmp.stx_gid = from_kgid_munged(current_user_ns(), stat->gid);
+	else
+		tmp.stx_gid = stat->gid_translated;
 	tmp.stx_mode = stat->mode;
 	tmp.stx_ino = stat->ino;
 	tmp.stx_size = stat->size;
@@ -632,8 +669,14 @@ static int cp_compat_stat(struct kstat *stat, struct compat_stat __user *ubuf)
 	tmp.st_nlink = stat->nlink;
 	if (tmp.st_nlink != stat->nlink)
 		return -EOVERFLOW;
-	SET_UID(tmp.st_uid, from_kuid_munged(current_user_ns(), stat->uid));
-	SET_GID(tmp.st_gid, from_kgid_munged(current_user_ns(), stat->gid));
+	if (uid_valid(stat->uid))
+		SET_UID(tmp.st_uid, from_kuid_munged(current_user_ns(), stat->uid));
+	else
+		SET_UID(tmp.st_uid, stat->uid_translated);
+	if (gid_valid(stat->gid))
+		SET_GID(tmp.st_gid, from_kgid_munged(current_user_ns(), stat->gid));
+	else
+		SET_GID(tmp.st_gid, stat->gid_translated);
 	tmp.st_rdev = old_encode_dev(stat->rdev);
 	if ((u64) stat->size > MAX_NON_LFS)
 		return -EOVERFLOW;

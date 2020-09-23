@@ -41,6 +41,8 @@ struct kstat {
 	dev_t		rdev;
 	kuid_t		uid;
 	kgid_t		gid;
+	uid_t		uid_translated;
+	gid_t		gid_translated;
 	loff_t		size;
 	struct timespec64 atime;
 	struct timespec64 mtime;
