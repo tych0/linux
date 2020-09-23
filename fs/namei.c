@@ -2846,7 +2846,7 @@ static int __vfs_create(struct user_namespace *user_ns, struct inode *dir,
 	error = security_inode_create(dir, dentry, mode);
 	if (error)
 		return error;
-	error = dir->i_op->create(dir, dentry, mode, want_excl);
+	error = iop_create(dir, user_ns, dir, dentry, mode, want_excl);
 	if (!error)
 		fsnotify_create(dir, dentry);
 	return error;
@@ -3148,14 +3148,18 @@ static struct dentry *lookup_open(struct nameidata *nd, struct file *file,
 
 	/* Negative dentry, just create the file */
 	if (!dentry->d_inode && (open_flag & O_CREAT)) {
+		struct user_namespace *user_ns;
+
 		file->f_mode |= FMODE_CREATED;
 		audit_inode_child(dir_inode, dentry, AUDIT_TYPE_CHILD_CREATE);
 		if (!dir_inode->i_op->create) {
 			error = -EACCES;
 			goto out_dput;
 		}
-		error = dir_inode->i_op->create(dir_inode, dentry, mode,
-						open_flag & O_EXCL);
+
+		user_ns = mnt_user_ns(nd->path.mnt);
+		error = iop_create(dir_inode, user_ns, dir_inode, dentry, mode,
+				   open_flag & O_EXCL);
 		if (error)
 			goto out_dput;
 	}
@@ -3335,7 +3339,7 @@ struct dentry *__vfs_tmpfile(struct user_namespace *user_ns, struct dentry *dent
 	child = d_alloc(dentry, &slash_name);
 	if (unlikely(!child))
 		goto out_err;
-	error = dir->i_op->tmpfile(dir, child, mode);
+	error = iop_tmpfile(dir, user_ns, dir, child, mode);
 	if (error)
 		goto out_err;
 	error = -ENOENT;
@@ -3611,7 +3615,7 @@ static int __vfs_mknod(struct user_namespace *user_ns, struct inode *dir,
 	if (error)
 		return error;
 
-	error = dir->i_op->mknod(dir, dentry, mode, dev);
+	error = iop_mknod(dir, user_ns, dir, dentry, mode, dev);
 	if (!error)
 		fsnotify_create(dir, dentry);
 	return error;
@@ -3720,7 +3724,7 @@ static int __vfs_mkdir(struct user_namespace *user_ns, struct inode *dir,
 	if (max_links && dir->i_nlink >= max_links)
 		return -EMLINK;
 
-	error = dir->i_op->mkdir(dir, dentry, mode);
+	error = iop_mkdir(dir, user_ns, dir, dentry, mode);
 	if (!error)
 		fsnotify_mkdir(dir, dentry);
 	return error;
@@ -4055,7 +4059,7 @@ static int __vfs_symlink(struct user_namespace *user_ns, struct inode *dir,
 	if (error)
 		return error;
 
-	error = dir->i_op->symlink(dir, dentry, oldname);
+	error = iop_symlink(dir, user_ns, dir, dentry, oldname);
 	if (!error)
 		fsnotify_create(dir, dentry);
 	return error;
@@ -4390,8 +4394,8 @@ static int __vfs_rename(struct renamedata *rd)
 		if (error)
 			goto out;
 	}
-	error = old_dir->i_op->rename(old_dir, old_dentry,
-				       new_dir, new_dentry, flags);
+	error = iop_rename(old_dir, rd->new_user_ns, old_dir, old_dentry,
+			   new_dir, new_dentry, flags);
 	if (error)
 		goto out;
 
