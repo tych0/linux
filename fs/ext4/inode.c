@@ -20,6 +20,7 @@
  */
 
 #include <linux/fs.h>
+#include <linux/mount.h>
 #include <linux/time.h>
 #include <linux/highuid.h>
 #include <linux/pagemap.h>
@@ -5220,7 +5221,7 @@ static void ext4_wait_for_tail_page_commit(struct inode *inode)
 }
 
 /*
- * ext4_setattr()
+ * __ext4_setattr()
  *
  * Called from notify_change.
  *
@@ -5243,7 +5244,8 @@ static void ext4_wait_for_tail_page_commit(struct inode *inode)
  *
  * Called with inode->i_mutex down.
  */
-int ext4_setattr(struct dentry *dentry, struct iattr *attr)
+static int __ext4_setattr(struct user_namespace *user_ns, struct dentry *dentry,
+			  struct iattr *attr)
 {
 	struct inode *inode = d_inode(dentry);
 	int error, rc = 0;
@@ -5261,7 +5263,7 @@ int ext4_setattr(struct dentry *dentry, struct iattr *attr)
 				  ATTR_GID | ATTR_TIMES_SET))))
 		return -EPERM;
 
-	error = setattr_prepare(dentry, attr);
+	error = ns_setattr_prepare(user_ns, dentry, attr);
 	if (error)
 		return error;
 
@@ -5415,7 +5417,7 @@ out_mmap_sem:
 	}
 
 	if (!error) {
-		setattr_copy(inode, attr);
+		ns_setattr_copy(user_ns, inode, attr);
 		mark_inode_dirty(inode);
 	}
 
@@ -5436,9 +5438,21 @@ err_out:
 	return error;
 }
 
+int ext4_setattr(struct dentry *dentry, struct iattr *attr)
+{
+	return __ext4_setattr(&init_user_ns, dentry, attr);
+}
+
+int ext4_setattr_mapped(struct user_namespace *user_ns, struct dentry *dentry,
+			struct iattr *attr)
+{
+	return __ext4_setattr(user_ns, dentry, attr);
+}
+
 int ext4_getattr(const struct path *path, struct kstat *stat,
 		 u32 request_mask, unsigned int query_flags)
 {
+	struct user_namespace *user_ns;
 	struct inode *inode = d_inode(path->dentry);
 	struct ext4_inode *raw_inode;
 	struct ext4_inode_info *ei = EXT4_I(inode);
@@ -5472,7 +5486,8 @@ int ext4_getattr(const struct path *path, struct kstat *stat,
 				  STATX_ATTR_NODUMP |
 				  STATX_ATTR_VERITY);
 
-	generic_fillattr(inode, stat);
+	user_ns = mnt_user_ns(path->mnt);
+	ns_generic_fillattr(user_ns, inode, stat);
 	return 0;
 }
 

@@ -2607,8 +2607,8 @@ static int ext4_add_nondir(handle_t *handle,
  * If the create succeeds, we fill in the inode information
  * with d_instantiate().
  */
-static int ext4_create(struct inode *dir, struct dentry *dentry, umode_t mode,
-		       bool excl)
+static int __ext4_create(struct user_namespace *user_ns, struct inode *dir,
+			 struct dentry *dentry, umode_t mode, bool excl)
 {
 	handle_t *handle;
 	struct inode *inode;
@@ -2621,8 +2621,8 @@ static int ext4_create(struct inode *dir, struct dentry *dentry, umode_t mode,
 	credits = (EXT4_DATA_TRANS_BLOCKS(dir->i_sb) +
 		   EXT4_INDEX_EXTRA_TRANS_BLOCKS + 3);
 retry:
-	inode = ext4_new_inode_start_handle(dir, mode, &dentry->d_name, 0,
-					    NULL, EXT4_HT_DIR, credits);
+	inode = ext4_new_inode_start_handle(user_ns, dir, mode, &dentry->d_name,
+					    0, NULL, EXT4_HT_DIR, credits);
 	handle = ext4_journal_current_handle();
 	err = PTR_ERR(inode);
 	if (!IS_ERR(inode)) {
@@ -2640,8 +2640,14 @@ retry:
 	return err;
 }
 
-static int ext4_mknod(struct inode *dir, struct dentry *dentry,
-		      umode_t mode, dev_t rdev)
+static int ext4_create(struct inode *dir, struct dentry *dentry, umode_t mode,
+		       bool excl)
+{
+	return __ext4_create(&init_user_ns, dir, dentry, mode, excl);
+}
+
+static int __ext4_mknod(struct user_namespace *user_ns, struct inode *dir,
+			struct dentry *dentry, umode_t mode, dev_t rdev)
 {
 	handle_t *handle;
 	struct inode *inode;
@@ -2654,8 +2660,8 @@ static int ext4_mknod(struct inode *dir, struct dentry *dentry,
 	credits = (EXT4_DATA_TRANS_BLOCKS(dir->i_sb) +
 		   EXT4_INDEX_EXTRA_TRANS_BLOCKS + 3);
 retry:
-	inode = ext4_new_inode_start_handle(dir, mode, &dentry->d_name, 0,
-					    NULL, EXT4_HT_DIR, credits);
+	inode = ext4_new_inode_start_handle(user_ns, dir, mode, &dentry->d_name,
+					    0, NULL, EXT4_HT_DIR, credits);
 	handle = ext4_journal_current_handle();
 	err = PTR_ERR(inode);
 	if (!IS_ERR(inode)) {
@@ -2672,7 +2678,14 @@ retry:
 	return err;
 }
 
-static int ext4_tmpfile(struct inode *dir, struct dentry *dentry, umode_t mode)
+static int ext4_mknod(struct inode *dir, struct dentry *dentry,
+			umode_t mode, dev_t rdev)
+{
+	return __ext4_mknod(&init_user_ns, dir, dentry, mode, rdev);
+}
+
+static int __ext4_tmpfile(struct user_namespace *user_ns, struct inode *dir,
+			  struct dentry *dentry, umode_t mode)
 {
 	handle_t *handle;
 	struct inode *inode;
@@ -2683,7 +2696,7 @@ static int ext4_tmpfile(struct inode *dir, struct dentry *dentry, umode_t mode)
 		return err;
 
 retry:
-	inode = ext4_new_inode_start_handle(dir, mode,
+	inode = ext4_new_inode_start_handle(user_ns, dir, mode,
 					    NULL, 0, NULL,
 					    EXT4_HT_DIR,
 			EXT4_MAXQUOTAS_INIT_BLOCKS(dir->i_sb) +
@@ -2710,6 +2723,11 @@ err_unlock_inode:
 	ext4_journal_stop(handle);
 	unlock_new_inode(inode);
 	return err;
+}
+
+static int ext4_tmpfile(struct inode *dir, struct dentry *dentry, umode_t mode)
+{
+	return __ext4_tmpfile(&init_user_ns, dir, dentry, mode);
 }
 
 struct ext4_dir_entry_2 *ext4_init_dot_dotdot(struct inode *inode,
@@ -2781,7 +2799,8 @@ out:
 	return err;
 }
 
-static int ext4_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
+static int __ext4_mkdir(struct user_namespace *user_ns, struct inode *dir,
+			struct dentry *dentry, umode_t mode)
 {
 	handle_t *handle;
 	struct inode *inode;
@@ -2797,7 +2816,7 @@ static int ext4_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
 	credits = (EXT4_DATA_TRANS_BLOCKS(dir->i_sb) +
 		   EXT4_INDEX_EXTRA_TRANS_BLOCKS + 3);
 retry:
-	inode = ext4_new_inode_start_handle(dir, S_IFDIR | mode,
+	inode = ext4_new_inode_start_handle(user_ns, dir, S_IFDIR | mode,
 					    &dentry->d_name,
 					    0, NULL, EXT4_HT_DIR, credits);
 	handle = ext4_journal_current_handle();
@@ -2843,6 +2862,10 @@ out_retry:
 	return err;
 }
 
+static int ext4_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
+{
+	return __ext4_mkdir(&init_user_ns, dir, dentry, mode);
+}
 /*
  * routine to check that the specified directory is empty (for rmdir)
  */
@@ -3271,8 +3294,8 @@ out_trace:
 	return retval;
 }
 
-static int ext4_symlink(struct inode *dir,
-			struct dentry *dentry, const char *symname)
+static int __ext4_symlink(struct user_namespace *user_ns, struct inode *dir,
+			  struct dentry *dentry, const char *symname)
 {
 	handle_t *handle;
 	struct inode *inode;
@@ -3312,7 +3335,7 @@ static int ext4_symlink(struct inode *dir,
 			  EXT4_INDEX_EXTRA_TRANS_BLOCKS + 3;
 	}
 
-	inode = ext4_new_inode_start_handle(dir, S_IFLNK|S_IRWXUGO,
+	inode = ext4_new_inode_start_handle(user_ns, dir, S_IFLNK|S_IRWXUGO,
 					    &dentry->d_name, 0, NULL,
 					    EXT4_HT_DIR, credits);
 	handle = ext4_journal_current_handle();
@@ -3398,6 +3421,12 @@ out_free_encrypted_link:
 	if (disk_link.name != (unsigned char *)symname)
 		kfree(disk_link.name);
 	return err;
+}
+
+static int ext4_symlink(struct inode *dir, struct dentry *dentry,
+			const char *symname)
+{
+	return __ext4_symlink(&init_user_ns, dir, dentry, symname);
 }
 
 static int ext4_link(struct dentry *old_dentry,
@@ -3638,7 +3667,8 @@ static void ext4_update_dir_count(handle_t *handle, struct ext4_renament *ent)
 	}
 }
 
-static struct inode *ext4_whiteout_for_rename(struct ext4_renament *ent,
+static struct inode *ext4_whiteout_for_rename(struct user_namespace *user_ns,
+					      struct ext4_renament *ent,
 					      int credits, handle_t **h)
 {
 	struct inode *wh;
@@ -3652,7 +3682,8 @@ static struct inode *ext4_whiteout_for_rename(struct ext4_renament *ent,
 	credits += (EXT4_MAXQUOTAS_TRANS_BLOCKS(ent->dir->i_sb) +
 		    EXT4_XATTR_TRANS_BLOCKS + 4);
 retry:
-	wh = ext4_new_inode_start_handle(ent->dir, S_IFCHR | WHITEOUT_MODE,
+	wh = ext4_new_inode_start_handle(user_ns, ent->dir,
+					 S_IFCHR | WHITEOUT_MODE,
 					 &ent->dentry->d_name, 0, NULL,
 					 EXT4_HT_DIR, credits);
 
@@ -3679,9 +3710,9 @@ retry:
  * while new_{dentry,inode) refers to the destination dentry/inode
  * This comes from rename(const char *oldpath, const char *newpath)
  */
-static int ext4_rename(struct inode *old_dir, struct dentry *old_dentry,
-		       struct inode *new_dir, struct dentry *new_dentry,
-		       unsigned int flags)
+static int ext4_rename(struct user_namespace *user_ns, struct inode *old_dir,
+		       struct dentry *old_dentry, struct inode *new_dir,
+		       struct dentry *new_dentry, unsigned int flags)
 {
 	handle_t *handle = NULL;
 	struct ext4_renament old = {
@@ -3765,7 +3796,7 @@ static int ext4_rename(struct inode *old_dir, struct dentry *old_dentry,
 			goto end_rename;
 		}
 	} else {
-		whiteout = ext4_whiteout_for_rename(&old, credits, &handle);
+		whiteout = ext4_whiteout_for_rename(user_ns, &old, credits, &handle);
 		if (IS_ERR(whiteout)) {
 			retval = PTR_ERR(whiteout);
 			whiteout = NULL;
@@ -4040,9 +4071,9 @@ end_rename:
 	return retval;
 }
 
-static int ext4_rename2(struct inode *old_dir, struct dentry *old_dentry,
-			struct inode *new_dir, struct dentry *new_dentry,
-			unsigned int flags)
+static int __ext4_rename2(struct user_namespace *user_ns, struct inode *old_dir,
+			  struct dentry *old_dentry, struct inode *new_dir,
+			  struct dentry *new_dentry, unsigned int flags)
 {
 	int err;
 
@@ -4062,8 +4093,58 @@ static int ext4_rename2(struct inode *old_dir, struct dentry *old_dentry,
 					 new_dir, new_dentry);
 	}
 
-	return ext4_rename(old_dir, old_dentry, new_dir, new_dentry, flags);
+	return ext4_rename(user_ns, old_dir, old_dentry, new_dir, new_dentry, flags);
 }
+
+static int ext4_rename2(struct inode *old_dir, struct dentry *old_dentry,
+			struct inode *new_dir, struct dentry *new_dentry,
+			unsigned int flags)
+{
+	return __ext4_rename2(&init_user_ns, old_dir, old_dentry, new_dir,
+			      new_dentry, flags);
+}
+
+#ifdef CONFIG_IDMAP_MOUNTS
+static int ext4_create_mapped(struct user_namespace *user_ns, struct inode *dir,
+			      struct dentry *dentry, umode_t mode, bool excl)
+{
+	return __ext4_create(user_ns, dir, dentry, mode, excl);
+}
+
+static int ext4_mknod_mapped(struct user_namespace *user_ns, struct inode *dir,
+			     struct dentry *dentry, umode_t mode, dev_t rdev)
+{
+	return __ext4_mknod(user_ns, dir, dentry, mode, rdev);
+}
+static int ext4_tmpfile_mapped(struct user_namespace *user_ns,
+			       struct inode *dir, struct dentry *dentry,
+			       umode_t mode)
+{
+	return __ext4_tmpfile(user_ns, dir, dentry, mode);
+}
+
+static int ext4_mkdir_mapped(struct user_namespace *user_ns, struct inode *dir,
+			     struct dentry *dentry, umode_t mode)
+{
+	return __ext4_mkdir(user_ns, dir, dentry, mode);
+}
+
+static int ext4_symlink_mapped(struct user_namespace *user_ns,
+			       struct inode *dir, struct dentry *dentry,
+			       const char *symname)
+{
+	return __ext4_symlink(user_ns, dir, dentry, symname);
+}
+
+static int ext4_rename2_mapped(struct user_namespace *user_ns,
+			       struct inode *old_dir, struct dentry *old_dentry,
+			       struct inode *new_dir, struct dentry *new_dentry,
+			       unsigned int flags)
+{
+	return __ext4_rename2(user_ns, old_dir, old_dentry, new_dir,
+			      new_dentry, flags);
+}
+#endif
 
 /*
  * directories can handle most operations...
@@ -4085,6 +4166,15 @@ const struct inode_operations ext4_dir_inode_operations = {
 	.get_acl	= ext4_get_acl,
 	.set_acl	= ext4_set_acl,
 	.fiemap         = ext4_fiemap,
+#ifdef CONFIG_IDMAP_MOUNTS
+	.create_mapped	= ext4_create_mapped,
+	.symlink_mapped	= ext4_symlink_mapped,
+	.mkdir_mapped	= ext4_mkdir_mapped,
+	.mknod_mapped	= ext4_mknod_mapped,
+	.tmpfile_mapped	= ext4_tmpfile_mapped,
+	.rename_mapped	= ext4_rename2_mapped,
+	.setattr_mapped	= ext4_setattr_mapped,
+#endif
 };
 
 const struct inode_operations ext4_special_inode_operations = {
@@ -4093,4 +4183,7 @@ const struct inode_operations ext4_special_inode_operations = {
 	.listxattr	= ext4_listxattr,
 	.get_acl	= ext4_get_acl,
 	.set_acl	= ext4_set_acl,
+#ifdef CONFIG_IDMAP_MOUNTS
+	.setattr_mapped	= ext4_setattr_mapped,
+#endif
 };
