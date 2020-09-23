@@ -18,34 +18,39 @@
 #include <linux/evm.h>
 #include <linux/ima.h>
 
-static bool chown_ok(const struct inode *inode, kuid_t uid)
+static bool chown_ok(struct user_namespace *user_ns,
+		     const struct inode *inode,
+		     kuid_t uid)
 {
-	if (uid_eq(current_fsuid(), inode->i_uid) &&
-	    uid_eq(uid, inode->i_uid))
+	kuid_t kuid = i_uid_into(user_ns, inode);
+	if (uid_eq(current_fsuid(), kuid) && uid_eq(uid, kuid))
 		return true;
-	if (capable_wrt_inode_uidgid(inode, CAP_CHOWN))
+	if (ns_capable_wrt_inode_uidgid(user_ns, inode, CAP_CHOWN))
 		return true;
-	if (uid_eq(inode->i_uid, INVALID_UID) &&
+	if (uid_eq(kuid, INVALID_UID) &&
 	    ns_capable(inode->i_sb->s_user_ns, CAP_CHOWN))
 		return true;
 	return false;
 }
 
-static bool chgrp_ok(const struct inode *inode, kgid_t gid)
+static bool chgrp_ok(struct user_namespace *user_ns,
+		     const struct inode *inode, kgid_t gid)
 {
-	if (uid_eq(current_fsuid(), inode->i_uid) &&
-	    (in_group_p(gid) || gid_eq(gid, inode->i_gid)))
+	kgid_t kgid = i_gid_into(user_ns, inode);
+	if (uid_eq(current_fsuid(), i_uid_into(user_ns, inode)) &&
+	    (in_group_p(gid) || gid_eq(gid, kgid)))
 		return true;
-	if (capable_wrt_inode_uidgid(inode, CAP_CHOWN))
+	if (ns_capable_wrt_inode_uidgid(user_ns, inode, CAP_CHOWN))
 		return true;
-	if (gid_eq(inode->i_gid, INVALID_GID) &&
+	if (gid_eq(kgid, INVALID_GID) &&
 	    ns_capable(inode->i_sb->s_user_ns, CAP_CHOWN))
 		return true;
 	return false;
 }
 
 /**
- * setattr_prepare - check if attribute changes to a dentry are allowed
+ * ns_setattr_prepare - check if attribute changes to a dentry are allowed
+ * @user_ns:	user namespace we're coming from
  * @dentry:	dentry to check
  * @attr:	attributes to change
  *
@@ -58,7 +63,8 @@ static bool chgrp_ok(const struct inode *inode, kgid_t gid)
  * Should be called as the first thing in ->setattr implementations,
  * possibly after taking additional locks.
  */
-int setattr_prepare(struct dentry *dentry, struct iattr *attr)
+int ns_setattr_prepare(struct user_namespace *user_ns, struct dentry *dentry,
+		       struct iattr *attr)
 {
 	struct inode *inode = d_inode(dentry);
 	unsigned int ia_valid = attr->ia_valid;
@@ -78,27 +84,27 @@ int setattr_prepare(struct dentry *dentry, struct iattr *attr)
 		goto kill_priv;
 
 	/* Make sure a caller can chown. */
-	if ((ia_valid & ATTR_UID) && !chown_ok(inode, attr->ia_uid))
+	if ((ia_valid & ATTR_UID) && !chown_ok(user_ns, inode, attr->ia_uid))
 		return -EPERM;
 
 	/* Make sure caller can chgrp. */
-	if ((ia_valid & ATTR_GID) && !chgrp_ok(inode, attr->ia_gid))
+	if ((ia_valid & ATTR_GID) && !chgrp_ok(user_ns, inode, attr->ia_gid))
 		return -EPERM;
 
 	/* Make sure a caller can chmod. */
 	if (ia_valid & ATTR_MODE) {
-		if (!inode_owner_or_capable(inode))
+		if (!ns_inode_owner_or_capable(user_ns, inode))
 			return -EPERM;
 		/* Also check the setgid bit! */
-		if (!in_group_p((ia_valid & ATTR_GID) ? attr->ia_gid :
-				inode->i_gid) &&
-		    !capable_wrt_inode_uidgid(inode, CAP_FSETID))
+               if (!in_group_p((ia_valid & ATTR_GID) ? attr->ia_gid :
+                                i_gid_into(user_ns, inode)) &&
+                    !capable_wrt_inode_uidgid(inode, CAP_FSETID))
 			attr->ia_mode &= ~S_ISGID;
 	}
 
 	/* Check for setting the inode time. */
 	if (ia_valid & (ATTR_MTIME_SET | ATTR_ATIME_SET | ATTR_TIMES_SET)) {
-		if (!inode_owner_or_capable(inode))
+		if (!ns_inode_owner_or_capable(user_ns, inode))
 			return -EPERM;
 	}
 
@@ -113,6 +119,12 @@ kill_priv:
 	}
 
 	return 0;
+}
+EXPORT_SYMBOL(ns_setattr_prepare);
+
+int setattr_prepare(struct dentry *dentry, struct iattr *attr)
+{
+	return ns_setattr_prepare(&init_user_ns, dentry, attr);
 }
 EXPORT_SYMBOL(setattr_prepare);
 
@@ -161,6 +173,35 @@ out_big:
 EXPORT_SYMBOL(inode_newsize_ok);
 
 /**
+ * TODO: Document me!
+ */
+void ns_setattr_copy(struct user_namespace *user_ns, struct inode *inode,
+		     const struct iattr *attr)
+{
+	unsigned int ia_valid = attr->ia_valid;
+
+	if (ia_valid & ATTR_UID)
+		inode->i_uid = attr->ia_uid;
+	if (ia_valid & ATTR_GID)
+		inode->i_gid = attr->ia_gid;
+	if (ia_valid & ATTR_ATIME)
+		inode->i_atime = attr->ia_atime;
+	if (ia_valid & ATTR_MTIME)
+		inode->i_mtime = attr->ia_mtime;
+	if (ia_valid & ATTR_CTIME)
+		inode->i_ctime = attr->ia_ctime;
+	if (ia_valid & ATTR_MODE) {
+		umode_t mode = attr->ia_mode;
+		kgid_t kgid = i_gid_into(user_ns, inode);
+		if (!in_group_p(kgid) &&
+		    !ns_capable_wrt_inode_uidgid(user_ns, inode, CAP_FSETID))
+			mode &= ~S_ISGID;
+		inode->i_mode = mode;
+	}
+}
+EXPORT_SYMBOL(ns_setattr_copy);
+
+/**
  * setattr_copy - copy simple metadata updates into the generic inode
  * @inode:	the inode to be updated
  * @attr:	the new attributes
@@ -177,26 +218,7 @@ EXPORT_SYMBOL(inode_newsize_ok);
  */
 void setattr_copy(struct inode *inode, const struct iattr *attr)
 {
-	unsigned int ia_valid = attr->ia_valid;
-
-	if (ia_valid & ATTR_UID)
-		inode->i_uid = attr->ia_uid;
-	if (ia_valid & ATTR_GID)
-		inode->i_gid = attr->ia_gid;
-	if (ia_valid & ATTR_ATIME)
-		inode->i_atime = attr->ia_atime;
-	if (ia_valid & ATTR_MTIME)
-		inode->i_mtime = attr->ia_mtime;
-	if (ia_valid & ATTR_CTIME)
-		inode->i_ctime = attr->ia_ctime;
-	if (ia_valid & ATTR_MODE) {
-		umode_t mode = attr->ia_mode;
-
-		if (!in_group_p(inode->i_gid) &&
-		    !capable_wrt_inode_uidgid(inode, CAP_FSETID))
-			mode &= ~S_ISGID;
-		inode->i_mode = mode;
-	}
+	return ns_setattr_copy(&init_user_ns, inode, attr);
 }
 EXPORT_SYMBOL(setattr_copy);
 

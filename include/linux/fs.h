@@ -3356,8 +3356,12 @@ extern int buffer_migrate_page_norefs(struct address_space *,
 #endif
 
 extern int setattr_prepare(struct dentry *, struct iattr *);
+extern int ns_setattr_prepare(struct user_namespace *, struct dentry *,
+			      struct iattr *);
 extern int inode_newsize_ok(const struct inode *, loff_t offset);
 extern void setattr_copy(struct inode *inode, const struct iattr *attr);
+extern void ns_setattr_copy(struct user_namespace *user_ns, struct inode *inode,
+			    const struct iattr *attr);
 
 extern int file_update_time(struct file *file);
 
