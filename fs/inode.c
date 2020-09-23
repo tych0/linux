@@ -2128,6 +2128,33 @@ void init_special_inode(struct inode *inode, umode_t mode, dev_t rdev)
 EXPORT_SYMBOL(init_special_inode);
 
 /**
+ * ns_inode_init_owner - Init uid,gid,mode for new inode according to posix standards
+ * @inode: New inode
+ * @user_ns: User namespace the inode is seen from.
+ * @dir: Directory inode
+ * @mode: mode of the new inode
+ */
+void ns_inode_init_owner(struct inode *inode, struct user_namespace *user_ns,
+			 const struct inode *dir, umode_t mode)
+{
+	inode->i_uid = fsuid_into(user_ns);
+	if (dir && dir->i_mode & S_ISGID) {
+		inode->i_gid = dir->i_gid;
+
+		/* Directories are special, and always inherit S_ISGID */
+		if (S_ISDIR(mode))
+			mode |= S_ISGID;
+		else if ((mode & (S_ISGID | S_IXGRP)) == (S_ISGID | S_IXGRP) &&
+			 !in_group_p(i_gid_into(user_ns, inode)) &&
+			 !ns_capable_wrt_inode_uidgid(user_ns, dir, CAP_FSETID))
+			mode &= ~S_ISGID;
+	} else
+		inode->i_gid = fsgid_into(user_ns);
+	inode->i_mode = mode;
+}
+EXPORT_SYMBOL(ns_inode_init_owner);
+
+/**
  * inode_init_owner - Init uid,gid,mode for new inode according to posix standards
  * @inode: New inode
  * @dir: Directory inode
@@ -2136,20 +2163,7 @@ EXPORT_SYMBOL(init_special_inode);
 void inode_init_owner(struct inode *inode, const struct inode *dir,
 			umode_t mode)
 {
-	inode->i_uid = current_fsuid();
-	if (dir && dir->i_mode & S_ISGID) {
-		inode->i_gid = dir->i_gid;
-
-		/* Directories are special, and always inherit S_ISGID */
-		if (S_ISDIR(mode))
-			mode |= S_ISGID;
-		else if ((mode & (S_ISGID | S_IXGRP)) == (S_ISGID | S_IXGRP) &&
-			 !in_group_p(inode->i_gid) &&
-			 !capable_wrt_inode_uidgid(dir, CAP_FSETID))
-			mode &= ~S_ISGID;
-	} else
-		inode->i_gid = current_fsgid();
-	inode->i_mode = mode;
+	return ns_inode_init_owner(inode, current_user_ns(), dir, mode);
 }
 EXPORT_SYMBOL(inode_init_owner);
 

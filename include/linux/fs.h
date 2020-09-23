@@ -1817,6 +1817,8 @@ extern long compat_ptr_ioctl(struct file *file, unsigned int cmd,
  */
 extern void inode_init_owner(struct inode *inode, const struct inode *dir,
 			umode_t mode);
+extern void ns_inode_init_owner(struct inode *inode, struct user_namespace *user_ns,
+			 const struct inode *dir, umode_t mode);
 extern bool may_open_dev(const struct path *path);
 
 /*
