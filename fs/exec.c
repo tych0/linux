@@ -1680,6 +1680,36 @@ static void check_unsafe_exec(struct linux_binprm *bprm)
 	spin_unlock(&p->fs->lock);
 }
 
+/*
+ * Verify that we have a mapping for suid/sgid.
+ * If we're looking that the suid/sgid through an idmapped mount we
+ * translate from the idmapped mount's user namespace into the caller's
+ * user namespace. This step is a nop for any non-idmapped mount.
+ */
+static inline bool may_suid(struct linux_binprm *bprm, struct file *file,
+			    kuid_t *uid, kgid_t *gid)
+{
+	kuid_t euid;
+	kgid_t egid;
+	struct user_namespace *user_ns = mnt_user_ns(file->f_path.mnt);
+
+	euid = kuid_into(user_ns, *uid);
+	if (!uid_valid(euid))
+		return false;
+
+	egid = kgid_into(user_ns, *gid);
+	if (!gid_valid(egid))
+		return false;
+
+	if (!kuid_has_mapping(bprm->cred->user_ns, euid) ||
+	    !kgid_has_mapping(bprm->cred->user_ns, egid))
+		return false;
+
+	*uid = euid;
+	*gid = egid;
+	return true;
+}
+
 static void bprm_fill_uid(struct linux_binprm *bprm, struct file *file)
 {
 	/* Handle suid and sgid on files */
@@ -1709,8 +1739,7 @@ static void bprm_fill_uid(struct linux_binprm *bprm, struct file *file)
 	inode_unlock(inode);
 
 	/* We ignore suid/sgid if there are no mappings for them in the ns */
-	if (!kuid_has_mapping(bprm->cred->user_ns, uid) ||
-		 !kgid_has_mapping(bprm->cred->user_ns, gid))
+	if (!may_suid(bprm, file, &uid, &gid))
 		return;
 
 	if (mode & S_ISUID) {
