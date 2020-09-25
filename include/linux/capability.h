@@ -251,6 +251,8 @@ extern bool privileged_wrt_inode_uidgid(struct user_namespace *ns,
 					struct user_namespace *mount_user_ns,
 					const struct inode *inode);
 extern bool capable_wrt_inode_uidgid(const struct inode *inode, int cap);
+extern bool ns_capable_wrt_inode_uidgid(struct user_namespace *ns,
+					const struct inode *inode, int cap);
 extern bool file_ns_capable(const struct file *file, struct user_namespace *ns, int cap);
 extern bool ptracer_capable(struct task_struct *tsk, struct user_namespace *ns);
 static inline bool perfmon_capable(void)

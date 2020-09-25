@@ -492,6 +492,16 @@ bool privileged_wrt_inode_uidgid(struct user_namespace *ns,
 	       kgid_has_mapping(ns, i_gid_into(mnt_user_ns, inode));
 }
 
+bool ns_capable_wrt_inode_uidgid(struct user_namespace *mnt_user_ns,
+				 const struct inode *inode, int cap)
+{
+	struct user_namespace *ns = current_user_ns();
+
+	return ns_capable(ns, cap) &&
+	       privileged_wrt_inode_uidgid(ns, mnt_user_ns, inode);
+}
+EXPORT_SYMBOL(ns_capable_wrt_inode_uidgid);
+
 /**
  * capable_wrt_inode_uidgid - Check nsown_capable and uid and gid mapped
  * @inode: The inode in question
@@ -503,10 +513,7 @@ bool privileged_wrt_inode_uidgid(struct user_namespace *ns,
  */
 bool capable_wrt_inode_uidgid(const struct inode *inode, int cap)
 {
-	struct user_namespace *ns = current_user_ns();
-
-	return ns_capable(ns, cap) &&
-	       privileged_wrt_inode_uidgid(ns, current_user_ns(), inode);
+	return ns_capable_wrt_inode_uidgid(&init_user_ns, inode, cap);
 }
 EXPORT_SYMBOL(capable_wrt_inode_uidgid);
 
