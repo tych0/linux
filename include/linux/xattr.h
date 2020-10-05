@@ -16,6 +16,7 @@
 #include <linux/types.h>
 #include <linux/spinlock.h>
 #include <linux/mm.h>
+#include <linux/user_namespace.h>
 #include <uapi/linux/xattr.h>
 
 struct inode;
@@ -56,7 +57,9 @@ int __vfs_setxattr_locked(struct dentry *, const char *, const void *, size_t, i
 int vfs_setxattr(struct dentry *, const char *, const void *, size_t, int);
 int __vfs_removexattr(struct dentry *, const char *);
 int __vfs_removexattr_locked(struct dentry *, const char *, struct inode **);
+int __ns_vfs_removexattr_locked(struct user_namespace *user_ns, struct dentry *, const char *, struct inode **);
 int vfs_removexattr(struct dentry *, const char *);
+int ns_vfs_removexattr(struct user_namespace *user_ns, struct dentry *, const char *);
 
 ssize_t generic_listxattr(struct dentry *dentry, char *buffer, size_t buffer_size);
 ssize_t vfs_getxattr_alloc(struct dentry *dentry, const char *name,

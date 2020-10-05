@@ -444,23 +444,14 @@ __vfs_removexattr(struct dentry *dentry, const char *name)
 }
 EXPORT_SYMBOL(__vfs_removexattr);
 
-/**
- * __vfs_removexattr_locked: set an extended attribute while holding the inode
- * lock
- *
- *  @dentry - object to perform setxattr on
- *  @name - name of xattr to remove
- *  @delegated_inode - on return, will contain an inode pointer that
- *  a delegation was broken on, NULL if none.
- */
 int
-__vfs_removexattr_locked(struct dentry *dentry, const char *name,
+__ns_vfs_removexattr_locked(struct user_namespace *user_ns, struct dentry *dentry, const char *name,
 		struct inode **delegated_inode)
 {
 	struct inode *inode = dentry->d_inode;
 	int error;
 
-	error = xattr_permission(&init_user_ns, inode, name, MAY_WRITE);
+	error = xattr_permission(user_ns, inode, name, MAY_WRITE);
 	if (error)
 		return error;
 
@@ -482,10 +473,27 @@ __vfs_removexattr_locked(struct dentry *dentry, const char *name,
 out:
 	return error;
 }
+EXPORT_SYMBOL_GPL(__ns_vfs_removexattr_locked);
+
+/**
+ * __vfs_removexattr_locked: set an extended attribute while holding the inode
+ * lock
+ *
+ *  @dentry - object to perform setxattr on
+ *  @name - name of xattr to remove
+ *  @delegated_inode - on return, will contain an inode pointer that
+ *  a delegation was broken on, NULL if none.
+ */
+int
+__vfs_removexattr_locked(struct dentry *dentry, const char *name,
+		struct inode **delegated_inode)
+{
+	return __ns_vfs_removexattr_locked(&init_user_ns, dentry, name, delegated_inode);
+}
 EXPORT_SYMBOL_GPL(__vfs_removexattr_locked);
 
 int
-vfs_removexattr(struct dentry *dentry, const char *name)
+ns_vfs_removexattr(struct user_namespace *user_ns, struct dentry *dentry, const char *name)
 {
 	struct inode *inode = dentry->d_inode;
 	struct inode *delegated_inode = NULL;
@@ -493,7 +501,7 @@ vfs_removexattr(struct dentry *dentry, const char *name)
 
 retry_deleg:
 	inode_lock(inode);
-	error = __vfs_removexattr_locked(dentry, name, &delegated_inode);
+	error = __ns_vfs_removexattr_locked(user_ns, dentry, name, &delegated_inode);
 	inode_unlock(inode);
 
 	if (delegated_inode) {
@@ -503,6 +511,13 @@ retry_deleg:
 	}
 
 	return error;
+}
+EXPORT_SYMBOL_GPL(ns_vfs_removexattr);
+
+int
+vfs_removexattr(struct dentry *dentry, const char *name)
+{
+	return ns_vfs_removexattr(&init_user_ns, dentry, name);
 }
 EXPORT_SYMBOL_GPL(vfs_removexattr);
 
@@ -776,7 +791,8 @@ SYSCALL_DEFINE3(flistxattr, int, fd, char __user *, list, size_t, size)
  * Extended attribute REMOVE operations
  */
 static long
-removexattr(struct dentry *d, const char __user *name)
+removexattr(struct dentry *d, const char __user *name,
+	    struct user_namespace *user_ns)
 {
 	int error;
 	char kname[XATTR_NAME_MAX + 1];
@@ -787,7 +803,7 @@ removexattr(struct dentry *d, const char __user *name)
 	if (error < 0)
 		return error;
 
-	return vfs_removexattr(d, kname);
+	return ns_vfs_removexattr(user_ns, d, kname);
 }
 
 static int path_removexattr(const char __user *pathname,
@@ -801,7 +817,9 @@ retry:
 		return error;
 	error = mnt_want_write(path.mnt);
 	if (!error) {
-		error = removexattr(path.dentry, name);
+		struct user_namespace *user_ns = mnt_user_ns(path.mnt);
+
+		error = removexattr(path.dentry, name, user_ns);
 		mnt_drop_write(path.mnt);
 	}
 	path_put(&path);
@@ -834,7 +852,9 @@ SYSCALL_DEFINE2(fremovexattr, int, fd, const char __user *, name)
 	audit_file(f.file);
 	error = mnt_want_write_file(f.file);
 	if (!error) {
-		error = removexattr(f.file->f_path.dentry, name);
+		struct user_namespace *user_ns = mnt_user_ns(f.file->f_path.mnt);
+
+		error = removexattr(f.file->f_path.dentry, name, user_ns);
 		mnt_drop_write_file(f.file);
 	}
 	fdput(f);
