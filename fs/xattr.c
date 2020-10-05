@@ -83,7 +83,8 @@ xattr_resolve_name(struct inode *inode, const char **name)
  * because different namespaces have very different rules.
  */
 static int
-xattr_permission(struct inode *inode, const char *name, int mask)
+xattr_permission(struct user_namespace *user_ns, struct inode *inode,
+		 const char *name, int mask)
 {
 	/*
 	 * We can never set or remove an extended attribute on a read-only
@@ -127,11 +128,12 @@ xattr_permission(struct inode *inode, const char *name, int mask)
 		if (!S_ISREG(inode->i_mode) && !S_ISDIR(inode->i_mode))
 			return (mask & MAY_WRITE) ? -EPERM : -ENODATA;
 		if (S_ISDIR(inode->i_mode) && (inode->i_mode & S_ISVTX) &&
-		    (mask & MAY_WRITE) && !inode_owner_or_capable(inode))
+		    (mask & MAY_WRITE) &&
+		    !ns_inode_owner_or_capable(user_ns, inode))
 			return -EPERM;
 	}
 
-	return inode_permission(inode, mask);
+	return ns_inode_permission(user_ns, inode, mask);
 }
 
 /*
@@ -251,7 +253,7 @@ __vfs_setxattr_locked(struct dentry *dentry, const char *name,
 	struct inode *inode = dentry->d_inode;
 	int error;
 
-	error = xattr_permission(inode, name, MAY_WRITE);
+	error = xattr_permission(&init_user_ns, inode, name, MAY_WRITE);
 	if (error)
 		return error;
 
@@ -336,7 +338,7 @@ vfs_getxattr_alloc(struct dentry *dentry, const char *name, char **xattr_value,
 	char *value = *xattr_value;
 	int error;
 
-	error = xattr_permission(inode, name, MAY_READ);
+	error = xattr_permission(&init_user_ns, inode, name, MAY_READ);
 	if (error)
 		return error;
 
@@ -382,7 +384,7 @@ vfs_getxattr(struct dentry *dentry, const char *name, void *value, size_t size)
 	struct inode *inode = dentry->d_inode;
 	int error;
 
-	error = xattr_permission(inode, name, MAY_READ);
+	error = xattr_permission(&init_user_ns, inode, name, MAY_READ);
 	if (error)
 		return error;
 
@@ -458,7 +460,7 @@ __vfs_removexattr_locked(struct dentry *dentry, const char *name,
 	struct inode *inode = dentry->d_inode;
 	int error;
 
-	error = xattr_permission(inode, name, MAY_WRITE);
+	error = xattr_permission(&init_user_ns, inode, name, MAY_WRITE);
 	if (error)
 		return error;
 
