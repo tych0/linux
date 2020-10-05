@@ -233,6 +233,33 @@ int __vfs_setxattr_noperm(struct dentry *dentry, const char *name,
 	return error;
 }
 
+int
+__ns_vfs_setxattr_locked(struct user_namespace *user_ns, struct dentry *dentry,
+			 const char *name, const void *value, size_t size,
+			 int flags, struct inode **delegated_inode)
+{
+	struct inode *inode = dentry->d_inode;
+	int error;
+
+	error = xattr_permission(user_ns, inode, name, MAY_WRITE);
+	if (error)
+		return error;
+
+	error = security_inode_setxattr(dentry, name, value, size, flags);
+	if (error)
+		goto out;
+
+	error = try_break_deleg(inode, delegated_inode);
+	if (error)
+		goto out;
+
+	error = __vfs_setxattr_noperm(dentry, name, value, size, flags);
+
+out:
+	return error;
+}
+EXPORT_SYMBOL_GPL(__ns_vfs_setxattr_locked);
+
 /**
  * __vfs_setxattr_locked: set an extended attribute while holding the inode
  * lock
@@ -250,31 +277,14 @@ __vfs_setxattr_locked(struct dentry *dentry, const char *name,
 		const void *value, size_t size, int flags,
 		struct inode **delegated_inode)
 {
-	struct inode *inode = dentry->d_inode;
-	int error;
-
-	error = xattr_permission(&init_user_ns, inode, name, MAY_WRITE);
-	if (error)
-		return error;
-
-	error = security_inode_setxattr(dentry, name, value, size, flags);
-	if (error)
-		goto out;
-
-	error = try_break_deleg(inode, delegated_inode);
-	if (error)
-		goto out;
-
-	error = __vfs_setxattr_noperm(dentry, name, value, size, flags);
-
-out:
-	return error;
+	return __ns_vfs_setxattr_locked(&init_user_ns, dentry, name, value,
+					size, flags, delegated_inode);
 }
 EXPORT_SYMBOL_GPL(__vfs_setxattr_locked);
 
 int
-vfs_setxattr(struct dentry *dentry, const char *name, const void *value,
-		size_t size, int flags)
+ns_vfs_setxattr(struct user_namespace *user_ns, struct dentry *dentry,
+		const char *name, const void *value, size_t size, int flags)
 {
 	struct inode *inode = dentry->d_inode;
 	struct inode *delegated_inode = NULL;
@@ -282,7 +292,7 @@ vfs_setxattr(struct dentry *dentry, const char *name, const void *value,
 
 retry_deleg:
 	inode_lock(inode);
-	error = __vfs_setxattr_locked(dentry, name, value, size, flags,
+	error = __ns_vfs_setxattr_locked(user_ns, dentry, name, value, size, flags,
 	    &delegated_inode);
 	inode_unlock(inode);
 
@@ -292,6 +302,14 @@ retry_deleg:
 			goto retry_deleg;
 	}
 	return error;
+}
+EXPORT_SYMBOL_GPL(ns_vfs_setxattr);
+
+int
+vfs_setxattr(struct dentry *dentry, const char *name, const void *value,
+		size_t size, int flags)
+{
+	return ns_vfs_setxattr(&init_user_ns, dentry, name, value, size, flags);
 }
 EXPORT_SYMBOL_GPL(vfs_setxattr);
 
@@ -526,7 +544,7 @@ EXPORT_SYMBOL_GPL(vfs_removexattr);
  */
 static long
 setxattr(struct dentry *d, const char __user *name, const void __user *value,
-	 size_t size, int flags)
+	 size_t size, int flags, struct user_namespace *user_ns)
 {
 	int error;
 	void *kvalue = NULL;
@@ -562,7 +580,7 @@ setxattr(struct dentry *d, const char __user *name, const void __user *value,
 		}
 	}
 
-	error = vfs_setxattr(d, kname, kvalue, size, flags);
+	error = ns_vfs_setxattr(user_ns, d, kname, kvalue, size, flags);
 out:
 	kvfree(kvalue);
 
@@ -575,13 +593,17 @@ static int path_setxattr(const char __user *pathname,
 {
 	struct path path;
 	int error;
+
 retry:
 	error = user_path_at(AT_FDCWD, pathname, lookup_flags, &path);
 	if (error)
 		return error;
 	error = mnt_want_write(path.mnt);
 	if (!error) {
-		error = setxattr(path.dentry, name, value, size, flags);
+		struct user_namespace *user_ns;
+
+		user_ns = mnt_user_ns(path.mnt);
+		error = setxattr(path.dentry, name, value, size, flags, user_ns);
 		mnt_drop_write(path.mnt);
 	}
 	path_put(&path);
@@ -617,7 +639,11 @@ SYSCALL_DEFINE5(fsetxattr, int, fd, const char __user *, name,
 	audit_file(f.file);
 	error = mnt_want_write_file(f.file);
 	if (!error) {
-		error = setxattr(f.file->f_path.dentry, name, value, size, flags);
+		struct user_namespace *user_ns;
+
+		user_ns = mnt_user_ns(f.file->f_path.mnt);
+		error = setxattr(f.file->f_path.dentry, name, value, size,
+				 flags, user_ns);
 		mnt_drop_write_file(f.file);
 	}
 	fdput(f);
