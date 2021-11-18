@@ -408,3 +408,24 @@ void __init aa_free_root_ns(void)
 	 destroy_ns(ns);
 	 aa_put_ns(ns);
 }
+
+int aa_may_create_ns(struct aa_label *label)
+{
+	struct user_namespace *user_ns = current_user_ns();
+	struct aa_ns *view_ns = labels_view(label);
+	bool root_in_user_ns = uid_eq(current_euid(), make_kuid(user_ns, 0)) ||
+			       in_egroup_p(make_kgid(user_ns, 0));
+
+	/*
+	 * In order to allow unprivileged users to create aa namespaces in
+	 * their current aa namespace, we do level + 1 here. This matches the
+	 * semantic in aa_policy_view_capable (i.e. that user namespace level
+	 * corresponds to apparmor namespace level).
+	 */
+	if (root_in_user_ns && (user_ns == &init_user_ns ||
+	    (unprivileged_userns_apparmor_policy != 0 &&
+	     user_ns->level <= view_ns->level + 1)))
+		return 0;
+
+	return EACCES;
+}

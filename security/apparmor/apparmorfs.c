@@ -1781,7 +1781,7 @@ static int ns_mkdir_op(struct user_namespace *mnt_userns, struct inode *dir,
 	int error;
 
 	label = begin_current_label_crit_section();
-	error = aa_may_manage_policy(label, NULL, AA_MAY_LOAD_POLICY);
+	error = aa_may_create_ns(label);
 	end_current_label_crit_section(label);
 	if (error)
 		return error;
@@ -1979,7 +1979,7 @@ static int __aafs_ns_mkdir_entries(struct aa_ns *ns, struct dentry *dir)
 	ns_subremove(ns) = dent;
 
 	  /* use create_dentry so we can supply private data */
-	dent = aafs_create("namespaces", S_IFDIR | 0755, dir, ns, NULL, NULL,
+	dent = aafs_create("namespaces", S_IFDIR | 0777, dir, ns, NULL, NULL,
 			   &ns_dir_inode_operations);
 	if (IS_ERR(dent))
 		return PTR_ERR(dent);

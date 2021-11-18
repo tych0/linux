@@ -95,6 +95,7 @@ struct aa_ns *__aa_find_or_create_ns(struct aa_ns *parent, const char *name,
 				     struct dentry *dir);
 struct aa_ns *aa_prepare_ns(struct aa_ns *root, const char *name);
 void __aa_remove_ns(struct aa_ns *ns);
+int aa_may_create_ns(struct aa_label *label);
 
 static inline struct aa_profile *aa_deref_parent(struct aa_profile *p)
 {
