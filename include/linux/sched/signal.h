@@ -402,7 +402,8 @@ static inline int signal_pending(struct task_struct *p)
 
 static inline int __fatal_signal_pending(struct task_struct *p)
 {
-	return unlikely(sigismember(&p->pending.signal, SIGKILL));
+	return unlikely(sigismember(&p->pending.signal, SIGKILL) ||
+			sigismember(&p->signal->shared_pending.signal, SIGKILL));
 }
 
 static inline int fatal_signal_pending(struct task_struct *p)
