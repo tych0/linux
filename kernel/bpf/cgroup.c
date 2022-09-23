@@ -294,7 +294,9 @@ static void cgroup_bpf_release(struct work_struct *work)
 			if (pl->prog) {
 				if (pl->prog->expected_attach_type == BPF_LSM_CGROUP)
 					bpf_trampoline_unlink_cgroup_shim(pl->prog);
+				local_irq_disable();
 				bpf_prog_put(pl->prog);
+				local_irq_enable();
 			}
 			if (pl->link) {
 				if (pl->link->link.prog->expected_attach_type == BPF_LSM_CGROUP)
