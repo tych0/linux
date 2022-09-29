@@ -464,6 +464,34 @@ static void fuse_sync_writes(struct inode *inode)
 	fuse_release_nowrite(inode);
 }
 
+struct fuse_flush_args {
+	struct fuse_args args;
+	struct fuse_flush_in inarg;
+	struct inode *inode;
+	struct fuse_file *ff;
+};
+
+static void fuse_flush_end(struct fuse_mount *fm, struct fuse_args *args, int err)
+{
+	struct fuse_flush_args *fa = container_of(args, typeof(*fa), args);
+
+	if (err == -ENOSYS) {
+		fm->fc->no_flush = 1;
+		err = 0;
+	}
+
+	/*
+	 * In memory i_blocks is not maintained by fuse, if writeback cache is
+	 * enabled, i_blocks from cached attr may not be accurate.
+	 */
+	if (!err && fm->fc->writeback_cache)
+		fuse_invalidate_attr_mask(fa->inode, STATX_BLOCKS);
+
+
+	fuse_file_put(fa->ff, false, false);
+	kfree(fa);
+}
+
 static int fuse_flush(struct file *file, fl_owner_t id)
 {
 	struct inode *inode = file_inode(file);
@@ -504,6 +532,28 @@ static int fuse_flush(struct file *file, fl_owner_t id)
 	args.in_args[0].size = sizeof(inarg);
 	args.in_args[0].value = &inarg;
 	args.force = true;
+
+	if (current->flags & PF_EXITING) {
+		struct fuse_flush_args *fa;
+
+		err = -ENOMEM;
+		fa = kzalloc(sizeof(*fa), GFP_KERNEL);
+		if (!fa)
+			goto inval_attr_out;
+
+		memcpy(&fa->args, &args, sizeof(args));
+		memcpy(&fa->inarg, &inarg, sizeof(inarg));
+		fa->args.nocreds = true;
+		fa->args.end = fuse_flush_end;
+		fa->ff = fuse_file_get(ff);
+		fa->inode = inode;
+
+		err = fuse_simple_background(fm, &fa->args, GFP_KERNEL);
+		if (err)
+			fuse_flush_end(fm, &fa->args, err);
+
+		return err;
+	}
 
 	err = fuse_simple_request(fm, &args);
 	if (err == -ENOSYS) {
