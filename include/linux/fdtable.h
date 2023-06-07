@@ -77,6 +77,8 @@ struct dentry;
 #define files_fdtable(files) \
 	rcu_dereference_check_fdtable((files), (files)->fdt)
 
+unsigned long count_open_fds(struct fdtable *fdt);
+
 /*
  * The caller must ensure that fd table isn't shared or hold rcu or file lock
  */
