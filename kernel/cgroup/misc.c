@@ -12,6 +12,8 @@
 #include <linux/atomic.h>
 #include <linux/slab.h>
 #include <linux/misc_cgroup.h>
+#include <linux/mm.h>
+#include <linux/fdtable.h>
 
 #define MAX_STR "max"
 #define MAX_NUM ULONG_MAX
@@ -24,6 +26,7 @@ static const char *const misc_res_name[] = {
 	/* AMD SEV-ES ASIDs resource */
 	"sev_es",
 #endif
+	"nofile",
 };
 
 /* Root misc cgroup */
@@ -37,7 +40,9 @@ static struct misc_cg root_cg;
  * more than the actual capacity. We are using Limits resource distribution
  * model of cgroup for miscellaneous controller.
  */
-static unsigned long misc_res_capacity[MISC_CG_RES_TYPES];
+static unsigned long misc_res_capacity[MISC_CG_RES_TYPES] = {
+	[MISC_CG_RES_NOFILE] = MAX_NUM,
+};
 
 /**
  * parent_misc() - Get the parent of the passed misc cgroup.
@@ -446,10 +451,145 @@ static void misc_cg_free(struct cgroup_subsys_state *css)
 	kfree(css_misc(css));
 }
 
+static void revert_attach_until(struct cgroup_taskset *tset, struct task_struct *stop)
+{
+	struct task_struct *task;
+	struct cgroup_subsys_state* dst_css;
+
+	cgroup_taskset_for_each(task, dst_css, tset) {
+		struct misc_cg *misc, *old_misc;
+		struct cgroup_subsys_state *old_css;
+		struct files_struct *files;
+		struct fdtable *fdt;
+
+		if (task == stop)
+			break;
+
+		misc = css_misc(dst_css);
+		old_css = task_css(task, misc_cgrp_id);
+		old_misc = css_misc(old_css);
+
+		task_lock(task);
+		files = task->files;
+		spin_lock(&files->file_lock);
+		fdt = files_fdtable(files);
+
+		if (fdt->misc_cgroup_migrating) {
+			unsigned long nofile;
+
+			fdt->misc_cgroup_migrating = false;
+
+			nofile = count_open_fds(fdt);
+			misc_cg_charge(MISC_CG_RES_NOFILE, old_misc, nofile);
+
+			/*
+			 * We need to uncharge the original amount we charged,
+			 * which is the current amount adjusted by the delta.
+			 */
+			nofile += fdt->delta_during_migration;
+			misc_cg_uncharge(MISC_CG_RES_NOFILE, misc, nofile);
+
+		}
+		spin_unlock(&files->file_lock);
+		task_unlock(task);
+	}
+}
+
+static int charge_files(struct cgroup_taskset *tset)
+{
+	struct task_struct *task;
+	struct cgroup_subsys_state* dst_css;
+
+	cgroup_taskset_for_each(task, dst_css, tset) {
+		struct misc_cg *misc, *old_misc;
+		struct cgroup_subsys_state* old_css;
+		unsigned long nofile;
+		struct files_struct *files;
+		struct fdtable *fdt;
+		int ret;
+
+		misc = css_misc(dst_css);
+		old_css = task_css(task, misc_cgrp_id);
+		old_misc = css_misc(old_css);
+
+		task_lock(task);
+		files = task->files;
+		spin_lock(&files->file_lock);
+		fdt = files_fdtable(files);
+
+		/*
+		 * Did we already count this fdtable? If so, skip it.
+		 */
+		if (fdt->misc_cgroup_migrating) {
+			spin_unlock(&files->file_lock);
+			task_unlock(task);
+			continue;
+		}
+
+		fdt->misc_cgroup_migrating = true;
+		fdt->delta_during_migration = 0;
+
+		nofile = count_open_fds(fdt);
+		spin_unlock(&files->file_lock);
+		task_unlock(task);
+
+		ret = misc_cg_try_charge(MISC_CG_RES_NOFILE, misc, nofile);
+		if (ret < 0) {
+			revert_attach_until(tset, task);
+			return ret;
+		}
+		misc_cg_uncharge(MISC_CG_RES_NOFILE, old_misc, nofile);
+	}
+
+	return 0;
+}
+
+static int misc_cg_can_attach(struct cgroup_taskset *tset)
+{
+	return charge_files(tset);
+}
+
+static void misc_cg_cancel_attach(struct cgroup_taskset *tset)
+{
+	revert_attach_until(tset, NULL);
+}
+
+static void misc_cg_attach(struct cgroup_taskset *tset)
+{
+	struct task_struct *task;
+	struct cgroup_subsys_state* dst_css;
+
+	cgroup_taskset_for_each(task, dst_css, tset) {
+		struct misc_cg *misc;
+		struct files_struct *files;
+		struct fdtable *fdt;
+
+		misc = css_misc(dst_css);
+
+		task_lock(task);
+		files = task->files;
+		spin_lock(&files->file_lock);
+		fdt = files_fdtable(files);
+
+		/*
+		 * Only migrate fdts we have not already done.
+		 */
+		if (fdt->misc_cgroup_migrating) {
+			misc_cg_charge(MISC_CG_RES_NOFILE, misc, fdt->delta_during_migration);
+			fdt->misc_cgroup_migrating = false;
+		}
+		spin_unlock(&files->file_lock);
+		task_unlock(task);
+	}
+}
+
 /* Cgroup controller callbacks */
 struct cgroup_subsys misc_cgrp_subsys = {
 	.css_alloc = misc_cg_alloc,
 	.css_free = misc_cg_free,
 	.legacy_cftypes = misc_cg_files,
 	.dfl_cftypes = misc_cg_files,
+	.can_attach = misc_cg_can_attach,
+	.cancel_attach = misc_cg_cancel_attach,
+	.attach = misc_cg_attach,
 };

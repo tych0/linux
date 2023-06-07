@@ -31,6 +31,8 @@ struct fdtable {
 	unsigned long *open_fds;
 	unsigned long *full_fds_bits;
 	struct rcu_head rcu;
+	bool misc_cgroup_migrating;
+	int delta_during_migration;
 };
 
 static inline bool close_on_exec(unsigned int fd, const struct fdtable *fdt)

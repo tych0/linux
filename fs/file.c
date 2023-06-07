@@ -20,6 +20,7 @@
 #include <linux/spinlock.h>
 #include <linux/rcupdate.h>
 #include <linux/close_range.h>
+#include <linux/misc_cgroup.h>
 #include <net/sock.h>
 
 #include "internal.h"
@@ -148,6 +149,7 @@ static struct fdtable * alloc_fdtable(unsigned int nr)
 	fdt->close_on_exec = data;
 	data += nr / BITS_PER_BYTE;
 	fdt->full_fds_bits = data;
+	fdt->misc_cgroup_migrating = false;
 
 	return fdt;
 
@@ -271,6 +273,43 @@ static inline void __clear_open_fd(unsigned int fd, struct fdtable *fdt)
 	__clear_bit(fd / BITS_PER_LONG, fdt->full_fds_bits);
 }
 
+static int charge_current_fds(struct fdtable *fdt, unsigned int count)
+{
+	struct misc_cg *mcg;
+	int ret;
+
+	/*
+	 * If we are currently migrating, we only need to charge the migration
+	 * counter. The final migration commit/cancel will clean it up.
+	 */
+	if (fdt->misc_cgroup_migrating) {
+		fdt->delta_during_migration += count;
+		return 0;
+	}
+
+	mcg = get_current_misc_cg();
+	ret = misc_cg_try_charge(MISC_CG_RES_NOFILE, mcg, count);
+	put_misc_cg(mcg);
+	return ret;
+}
+
+static void uncharge_current_fds(struct fdtable *fdt, unsigned int count)
+{
+	struct misc_cg *mcg;
+
+	/*
+	 * As above, don't have to charge the cgroup if it is currently migrating.
+	 */
+	if (fdt->misc_cgroup_migrating) {
+		fdt->delta_during_migration -= count;
+		return;
+	}
+
+	mcg = get_current_misc_cg();
+	misc_cg_uncharge(MISC_CG_RES_NOFILE, mcg, count);
+	put_misc_cg(mcg);
+}
+
 static unsigned int count_open_files(struct fdtable *fdt)
 {
 	unsigned int size = fdt->max_fds;
@@ -347,9 +386,18 @@ struct files_struct *dup_fd(struct files_struct *oldf, unsigned int max_fds, int
 	new_fdt->open_fds = newf->open_fds_init;
 	new_fdt->full_fds_bits = newf->full_fds_bits_init;
 	new_fdt->fd = &newf->fd_array[0];
+	/*
+	 * This is a bit tricky: we set the delta here to 0 always, so if we
+	 * happen to be migrating later, we charge the entire new fdtable size
+	 * as a delta, instead of to the cgroup itself. The cgroup migration
+	 * code fixes this up on fail/success.
+	 */
+	new_fdt->delta_during_migration = 0;
 
 	spin_lock(&oldf->file_lock);
 	old_fdt = files_fdtable(oldf);
+	new_fdt->misc_cgroup_migrating = old_fdt->misc_cgroup_migrating;
+
 	open_files = sane_fdtable_size(old_fdt, max_fds);
 
 	/*
@@ -411,7 +459,18 @@ struct files_struct *dup_fd(struct files_struct *oldf, unsigned int max_fds, int
 
 	rcu_assign_pointer(newf->fdt, new_fdt);
 
-	return newf;
+	if (!charge_current_fds(new_fdt, count_open_fds(new_fdt)))
+		return newf;
+
+	new_fds = new_fdt->fd;
+	for (i = open_files; i != 0; i--) {
+		struct file *f = *new_fds++;
+		if (f)
+			fput(f);
+	}
+	if (new_fdt != &newf->fdtab)
+		__free_fdtable(new_fdt);
+	*errorp = -EMFILE;
 
 out_release:
 	kmem_cache_free(files_cachep, newf);
@@ -439,6 +498,7 @@ static struct fdtable *close_files(struct files_struct * files)
 			if (set & 1) {
 				struct file * file = xchg(&fdt->fd[i], NULL);
 				if (file) {
+					uncharge_current_fds(fdt, 1);
 					filp_close(file, files);
 					cond_resched();
 				}
@@ -542,6 +602,10 @@ repeat:
 	if (error)
 		goto repeat;
 
+	error = -EMFILE;
+	if (charge_current_fds(fdt, 1) < 0)
+		goto out;
+
 	if (start <= files->next_fd)
 		files->next_fd = fd + 1;
 
@@ -578,6 +642,8 @@ EXPORT_SYMBOL(get_unused_fd_flags);
 static void __put_unused_fd(struct files_struct *files, unsigned int fd)
 {
 	struct fdtable *fdt = files_fdtable(files);
+	if (test_bit(fd, fdt->open_fds))
+		uncharge_current_fds(fdt, 1);
 	__clear_open_fd(fd, fdt);
 	if (fd < files->next_fd)
 		files->next_fd = fd;
@@ -1135,7 +1201,7 @@ __releases(&files->file_lock)
 	 */
 	fdt = files_fdtable(files);
 	tofree = fdt->fd[fd];
-	if (!tofree && fd_is_open(fd, fdt))
+	if (!tofree && (fd_is_open(fd, fdt) || charge_current_fds(fdt, 1) < 0))
 		goto Ebusy;
 	get_file(file);
 	rcu_assign_pointer(fdt->fd[fd], file);
