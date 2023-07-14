@@ -583,6 +583,36 @@ static void misc_cg_attach(struct cgroup_taskset *tset)
 	}
 }
 
+static void misc_cg_fork(struct task_struct *task)
+{
+	struct misc_cg *dst_misc, *init_misc;
+	struct files_struct *files;
+	struct fdtable *fdt;
+	unsigned long nofile;
+
+	init_misc = css_misc(init_css_set.subsys[misc_cgrp_id]);
+	dst_misc = css_misc(task_get_css(task, misc_cgrp_id));
+
+	/*
+	 * When forking, tasks are initially put into the init_css_set (see
+	 * cgroup_fork()). Then, we do a dup_fd() and charge init_css_set for
+	 * the new task's fds. We need to migrate from the init_css_set to the
+	 * target one so we can charge the right place. Since the task hasn't
+	 * actually run any code yet, there's no need to worry about a
+	 * migration delta, so we can just do it directly.
+	 */
+	task_lock(task);
+	files = task->files;
+	spin_lock(&files->file_lock);
+	fdt = files_fdtable(files);
+	nofile = count_open_fds(fdt);
+	spin_unlock(&files->file_lock);
+	task_unlock(task);
+
+	misc_cg_uncharge(MISC_CG_RES_NOFILE, init_misc, nofile);
+	misc_cg_charge(MISC_CG_RES_NOFILE, dst_misc, nofile);
+}
+
 /* Cgroup controller callbacks */
 struct cgroup_subsys misc_cgrp_subsys = {
 	.css_alloc = misc_cg_alloc,
@@ -592,4 +622,5 @@ struct cgroup_subsys misc_cgrp_subsys = {
 	.can_attach = misc_cg_can_attach,
 	.cancel_attach = misc_cg_cancel_attach,
 	.attach = misc_cg_attach,
+	.fork = misc_cg_fork,
 };
