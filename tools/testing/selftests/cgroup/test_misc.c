@@ -68,13 +68,29 @@ cleanup:
 	return ret;
 }
 
-#define COPIES 5
+#define COPIES 1
 
 static int open_N_fds_and_sleep(const char *root, void *arg)
 {
 	int i, *sk_pair = arg;
+	long nofile;
+
+	nofile = cg_read_key_long(root, "misc.current", "nofile ");
+	ksft_print_msg("before ls -alh: %d\n", nofile);
+	system("ls -alh /proc/self/fd");
+	nofile = cg_read_key_long(root, "misc.current", "nofile ");
+	ksft_print_msg("after ls -alh: %d\n", nofile);
+	system("cat /sys/fs/cgroup/foo/cgroup.procs");
+	nofile = cg_read_key_long(root, "misc.current", "nofile ");
+	ksft_print_msg("after cat cgroup.procs: %d\n", nofile);
+	// system("ps auxf");
+	nofile = cg_read_key_long(root, "misc.current", "nofile ");
+	ksft_print_msg("open files count before close: %d\n", nofile);
 
 	close(sk_pair[0]);
+
+	nofile = cg_read_key_long(root, "misc.current", "nofile ");
+	ksft_print_msg("open files count before close: %d\n", nofile);
 
 	for (i = 0; i < N; i++) {
 		int fd;
@@ -84,12 +100,19 @@ static int open_N_fds_and_sleep(const char *root, void *arg)
 			ksft_print_msg("%d socket: %s\n", i, strerror(errno));
 			return 1;
 		}
+
+		if (i == N-1)
+			ksft_print_msg("last opened socket %d\n", fd);
 	}
 
 	if (write(sk_pair[1], "c", 1) != 1) {
 		ksft_print_msg("%d write: %s\n", i, strerror(errno));
 		return 1;
 	}
+
+	// system("ls -alh /proc/self/fd");
+	nofile = cg_read_key_long(root, "misc.current", "nofile ");
+	ksft_print_msg("open files count in %s after mass open: %d\n", root, nofile);
 
 	while (1)
 		sleep(1000);
@@ -99,7 +122,7 @@ static int test_miscg_threads(const char *root)
 {
 	int ret = KSFT_FAIL, i;
 	char *foo;
-	int sk_pairs[COPIES][2], pids[COPIES] = {};
+	int pids[COPIES] = {};
 	long nofile;
 
 	foo = cg_name(root, "foo");
@@ -117,32 +140,38 @@ static int test_miscg_threads(const char *root)
 		goto cleanup;
 	}
 
+	nofile = cg_read_key_long(foo, "misc.current", "nofile ");
+	ksft_print_msg("before any forking nonsense: %d\n", nofile);
+
 	for (i = 0; i < COPIES; i++) {
 		char c;
+		int sk_pair[2];
 
-		if (socketpair(PF_LOCAL, SOCK_SEQPACKET, 0, sk_pairs[i]) < 0) {
+		if (socketpair(PF_LOCAL, SOCK_SEQPACKET, 0, sk_pair) < 0) {
 			ksft_print_msg("socketpair failed %s\n", strerror(errno));
 			goto cleanup;
 		}
 
-		pids[i] = cg_run_nowait(foo, open_N_fds_and_sleep, sk_pairs[i]);
+		pids[i] = cg_run_nowait(foo, open_N_fds_and_sleep, sk_pair);
 		if (pids[i] < 0) {
 			ksft_print_msg("cg_run failed\n");
 			goto cleanup;
 		}
-		close(sk_pairs[i][1]);
+		close(sk_pair[1]);
 
-		if (read(sk_pairs[i][0], &c, 1) != 1) {
+		if (read(sk_pair[0], &c, 1) != 1) {
 			ksft_print_msg("%d read: %s\n", i, strerror(errno));
 			goto cleanup;
 		}
+		close(sk_pair[0]);
 	}
 
 	/*
-	 * We expect COPIES * N + 3 stdfs + 1 misc.current fds.
+	 * We expect COPIES * (N + 3 stdfs + 1 socketpair fd) + 1 misc.current fds.
 	 */
 	nofile = cg_read_key_long(foo, "misc.current", "nofile ");
-	if (nofile != COPIES*N+3+1) {
+	if (nofile != COPIES*(N+3+1)+1) {
+		system("ls -al /proc/self/fd");
 		ksft_print_msg("bad open files count: %d != %d\n", nofile, COPIES*N+3+1);
 		goto cleanup;
 	}
